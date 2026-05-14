@@ -1,0 +1,391 @@
+package com.jrules.ruleengine.v2.evaluator.graph;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.jrules.ruleengine.v2.evaluator.expression.ExpressionEvaluator;
+import com.jrules.ruleengine.v2.evaluator.scorecard.ScorecardEvaluator;
+import com.jrules.ruleengine.v2.evaluator.table.DecisionTableEvaluator;
+import com.jrules.ruleengine.v2.exception.EvaluationException;
+import com.jrules.ruleengine.v2.exception.MissingValueException;
+import com.jrules.ruleengine.v2.model.enums.OnMissing;
+import com.jrules.ruleengine.v2.model.enums.PolicyType;
+import com.jrules.ruleengine.v2.model.enums.TraceLevel;
+import com.jrules.ruleengine.v2.model.graph.NodeType;
+import com.jrules.ruleengine.v2.model.graph.PolicyEdge;
+import com.jrules.ruleengine.v2.model.graph.PolicyNode;
+import com.jrules.ruleengine.v2.model.graph.config.BranchCondition;
+import com.jrules.ruleengine.v2.model.graph.config.BranchNodeConfig;
+import com.jrules.ruleengine.v2.model.graph.config.ModelEntry;
+import com.jrules.ruleengine.v2.model.graph.config.ModelNodeConfig;
+import com.jrules.ruleengine.v2.model.graph.config.OutcomeNodeConfig;
+import com.jrules.ruleengine.v2.model.graph.config.RuleNodeConfig;
+import com.jrules.ruleengine.v2.model.graph.config.WorkflowNodeConfig;
+import com.jrules.ruleengine.v2.model.policy.Policy;
+import com.jrules.ruleengine.v2.model.request.EvaluationRequest;
+import com.jrules.ruleengine.v2.model.result.EvaluationResult;
+import com.jrules.ruleengine.v2.model.result.RuleResult;
+import com.jrules.ruleengine.v2.model.rule.Rule;
+import com.jrules.ruleengine.v2.model.scorecard.Scorecard;
+import com.jrules.ruleengine.v2.model.table.DecisionTable;
+import com.jrules.ruleengine.v2.parser.ExpressionParser;
+import com.jrules.ruleengine.v2.parser.ast.ExpressionNode;
+import com.jrules.ruleengine.v2.storage.dto.EvaluateStoredRequest;
+import com.jrules.ruleengine.v2.storage.service.PolicyStorageService;
+import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Lazy;
+import org.springframework.stereotype.Component;
+
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
+
+@Component
+@RequiredArgsConstructor
+public class DefaultGraphEvaluator implements GraphEvaluator {
+
+    private final ExpressionEvaluator expressionEvaluator;
+    private final ExpressionParser expressionParser;
+    private final ObjectMapper objectMapper;
+    private final DecisionTableEvaluator decisionTableEvaluator;
+    private final ScorecardEvaluator scorecardEvaluator;
+
+    @Lazy
+    @Autowired
+    private PolicyStorageService policyStorageService;
+
+    @Override
+    public EvaluationResult evaluate(EvaluationRequest request) {
+        long start = System.currentTimeMillis();
+        Policy policy = request.getPolicy();
+
+        Map<String, PolicyNode> nodeMap = policy.getNodes().stream()
+                .collect(Collectors.toMap(PolicyNode::getId, n -> n));
+        Map<String, Map<String, String>> edgeMap = buildEdgeMap(policy.getEdges());
+
+        PolicyNode current = policy.getNodes().stream()
+                .filter(n -> n.getType() == NodeType.START)
+                .findFirst()
+                .orElseThrow(() -> new EvaluationException("Policy has no START node"));
+
+        // Use a mutable context that enriched nodes (SOURCE, WORKFLOW) can write into
+        Map<String, Object> ctx = request.getContext() != null
+                ? new HashMap<>(request.getContext()) : new HashMap<>();
+        request.setContext(ctx);
+
+        List<RuleResult> trace = new ArrayList<>();
+        TraceLevel traceLevel = request.getTraceLevel() != null
+                ? request.getTraceLevel() : TraceLevel.STANDARD;
+
+        int maxSteps = 200;
+        while (current.getType() != NodeType.OUTCOME) {
+            if (--maxSteps <= 0) {
+                throw new EvaluationException("Max evaluation steps exceeded — possible cycle in policy graph");
+            }
+            String handle = evaluateNode(current, request, trace, traceLevel);
+            String nextId = edgeMap.getOrDefault(current.getId(), Map.of()).get(handle);
+            if (nextId == null) {
+                throw new EvaluationException(
+                        "No outgoing edge from node '" + current.getName() + "' [" + current.getId()
+                        + "] on handle '" + handle + "'");
+            }
+            current = nodeMap.get(nextId);
+            if (current == null) {
+                throw new EvaluationException("Edge points to unknown node id: " + nextId);
+            }
+        }
+
+        OutcomeNodeConfig outcomeConfig = asConfig(current, OutcomeNodeConfig.class);
+        return EvaluationResult.builder()
+                .policyId(policy.getId())
+                .policyVersion(policy.getVersion())
+                .policyType(PolicyType.RULE_CHAIN)
+                .outcome(outcomeConfig.getOutcome())
+                .outputFields(outcomeConfig.getOutputFields())
+                .triggeredBy(current.getName())
+                .ruleResults(traceLevel != TraceLevel.MINIMAL ? trace : null)
+                .evaluationMs(System.currentTimeMillis() - start)
+                .build();
+    }
+
+    private String evaluateNode(PolicyNode node, EvaluationRequest request,
+                                 List<RuleResult> trace, TraceLevel traceLevel) {
+        return switch (node.getType()) {
+            case START    -> "next";
+            case RULE     -> evaluateRuleNode(node, request, trace, traceLevel);
+            case BRANCH   -> evaluateBranchNode(node, request, trace, traceLevel);
+            case SOURCE   -> "next"; // data enrichment placeholder — passes through
+            case WORKFLOW -> evaluateWorkflowNode(node, request, trace, traceLevel);
+            case MODEL    -> evaluateModelNode(node, request, trace, traceLevel);
+            case OUTCOME  -> throw new EvaluationException("Internal error: evaluating OUTCOME node");
+        };
+    }
+
+    // ── RULE node ─────────────────────────────────────────────────────────────
+
+    private String evaluateRuleNode(PolicyNode node, EvaluationRequest request,
+                                     List<RuleResult> trace, TraceLevel traceLevel) {
+        RuleNodeConfig config = asConfig(node, RuleNodeConfig.class);
+        if (config == null || config.getRules() == null || config.getRules().isEmpty()) {
+            return "pass";
+        }
+        List<Rule> sorted = config.getRules().stream()
+                .sorted(Comparator.comparingInt(Rule::getPriority))
+                .toList();
+
+        for (Rule rule : sorted) {
+            if (rule.getExpression() == null || rule.getExpression().isBlank()) continue;
+            ExpressionNode ast;
+            try {
+                ast = expressionParser.parse(rule.getExpression());
+            } catch (Exception e) {
+                throw new EvaluationException("Rule '" + rule.getName()
+                        + "' in node '" + node.getName() + "': parse error: " + e.getMessage(), e);
+            }
+            boolean result;
+            try {
+                Object val = expressionEvaluator.evaluate(ast, request);
+                if (!(val instanceof Boolean b)) {
+                    throw new EvaluationException("Rule '" + rule.getName() + "': must return boolean");
+                }
+                result = b;
+            } catch (MissingValueException e) {
+                OnMissing om = rule.getOnMissing() != null ? rule.getOnMissing() : OnMissing.FAIL;
+                if (om == OnMissing.SKIP) continue;
+                result = (om == OnMissing.PASS);
+            }
+            if (result) {
+                if (traceLevel != TraceLevel.MINIMAL) {
+                    trace.add(RuleResult.builder()
+                            .name(node.getName() + " / " + rule.getName())
+                            .expression(traceLevel == TraceLevel.FULL ? rule.getExpression() : null)
+                            .result(true).action("pass").build());
+                }
+                continue;
+            }
+            // Main expression failed — check cantDecideExpression before returning fail
+            String cantDecideExpr = rule.getCantDecideExpression();
+            if (cantDecideExpr != null && !cantDecideExpr.isBlank()) {
+                try {
+                    ExpressionNode cdAst = expressionParser.parse(cantDecideExpr);
+                    Object cdVal = expressionEvaluator.evaluate(cdAst, request);
+                    if (Boolean.TRUE.equals(cdVal)) {
+                        if (traceLevel != TraceLevel.MINIMAL) {
+                            trace.add(RuleResult.builder()
+                                    .name(node.getName() + " / " + rule.getName())
+                                    .expression(traceLevel == TraceLevel.FULL ? cantDecideExpr : null)
+                                    .result(false).action("cantDecide").build());
+                        }
+                        return "cantDecide";
+                    }
+                } catch (MissingValueException ignored) {
+                    // cantDecide condition itself is missing data — treat as not triggered
+                }
+            }
+            if (traceLevel != TraceLevel.MINIMAL) {
+                trace.add(RuleResult.builder()
+                        .name(node.getName() + " / " + rule.getName())
+                        .expression(traceLevel == TraceLevel.FULL ? rule.getExpression() : null)
+                        .result(false).action("fail").build());
+            }
+            return "fail";
+        }
+        return "pass";
+    }
+
+    // ── BRANCH node ───────────────────────────────────────────────────────────
+
+    private String evaluateBranchNode(PolicyNode node, EvaluationRequest request,
+                                       List<RuleResult> trace, TraceLevel traceLevel) {
+        BranchNodeConfig config = asConfig(node, BranchNodeConfig.class);
+        if (config == null || config.getConditions() == null) return "default";
+
+        for (BranchCondition condition : config.getConditions()) {
+            if (condition.getExpression() == null || condition.getExpression().isBlank()) continue;
+            try {
+                ExpressionNode ast = expressionParser.parse(condition.getExpression());
+                Object val = expressionEvaluator.evaluate(ast, request);
+                if (Boolean.TRUE.equals(val)) {
+                    if (traceLevel != TraceLevel.MINIMAL) {
+                        trace.add(RuleResult.builder()
+                                .name(node.getName() + " / " + condition.getLabel())
+                                .expression(traceLevel == TraceLevel.FULL ? condition.getExpression() : null)
+                                .result(true)
+                                .action(condition.getId())
+                                .build());
+                    }
+                    return condition.getId();
+                }
+            } catch (MissingValueException ignored) {
+                // condition not met, continue to next
+            }
+        }
+        return "default";
+    }
+
+    // ── WORKFLOW node ─────────────────────────────────────────────────────────
+
+    private String evaluateWorkflowNode(PolicyNode node, EvaluationRequest request,
+                                         List<RuleResult> trace, TraceLevel traceLevel) {
+        WorkflowNodeConfig config = asConfig(node, WorkflowNodeConfig.class);
+        if (config == null || config.getPolicyId() == null) {
+            throw new EvaluationException("Workflow node '" + node.getName() + "' has no policyId");
+        }
+        EvaluateStoredRequest subReq = new EvaluateStoredRequest();
+        subReq.setContext(request.getContext());
+        subReq.setTraceLevel(request.getTraceLevel());
+
+        EvaluationResult subResult = policyStorageService.evaluateSubPolicy(
+                config.getPolicyId(), config.getVersion(), subReq, request.getActiveChain());
+
+        String resultKey = (config.getResultKey() != null && !config.getResultKey().isBlank())
+                ? config.getResultKey() : config.getPolicyId();
+        Map<String, Object> injected = new HashMap<>();
+        injected.put("outcome", subResult.getOutcome());
+        if (subResult.getOutputFields() != null) injected.putAll(subResult.getOutputFields());
+        request.getContext().put(resultKey, injected);
+
+        if (traceLevel != TraceLevel.MINIMAL) {
+            trace.add(RuleResult.builder()
+                    .name(node.getName() != null ? node.getName() : config.getPolicyId())
+                    .expression("[workflow:" + config.getPolicyId() + "]")
+                    .result(true)
+                    .action(subResult.getOutcome())
+                    .outcome(subResult.getOutcome())
+                    .build());
+        }
+        return subResult.getOutcome() != null ? subResult.getOutcome() : "default";
+    }
+
+    // ── MODEL node ────────────────────────────────────────────────────────────
+
+    private String evaluateModelNode(PolicyNode node, EvaluationRequest request,
+                                      List<RuleResult> trace, TraceLevel traceLevel) {
+        ModelNodeConfig config = asConfig(node, ModelNodeConfig.class);
+        if (config == null || config.getModels() == null || config.getModels().isEmpty()) {
+            return "next";
+        }
+        List<ModelEntry> sorted = config.getModels().stream()
+                .sorted(Comparator.comparingInt(ModelEntry::getPriority))
+                .toList();
+
+        for (ModelEntry model : sorted) {
+            String resultKey = (model.getResultKey() != null && !model.getResultKey().isBlank())
+                    ? model.getResultKey() : model.getName();
+
+            switch (model.getType()) {
+                case "DECISION_TABLE" -> {
+                    if (model.getInlineDefinition() == null) {
+                        throw new EvaluationException("Model '" + model.getName()
+                                + "' in node '" + node.getName() + "': inlineDefinition is required for DECISION_TABLE");
+                    }
+                    DecisionTable table = objectMapper.convertValue(model.getInlineDefinition(), DecisionTable.class);
+                    if (table.getName() == null) table.setName(model.getName());
+
+                    Policy tablePolicy = new Policy();
+                    tablePolicy.setId(model.getName());
+                    tablePolicy.setVersion("inline");
+                    tablePolicy.setType(PolicyType.DECISION_TABLE);
+                    tablePolicy.setTable(table);
+
+                    EvaluationRequest subReq = new EvaluationRequest();
+                    subReq.setPolicy(tablePolicy);
+                    subReq.setContext(request.getContext());
+                    subReq.setTraceLevel(request.getTraceLevel());
+
+                    EvaluationResult result = decisionTableEvaluator.evaluate(subReq);
+
+                    Map<String, Object> injected = new HashMap<>();
+                    injected.put("output", result.getTableOutput());
+                    if (result.getOutputColumn() != null) injected.put("outputColumn", result.getOutputColumn());
+                    request.getContext().put(resultKey, injected);
+
+                    if (traceLevel != TraceLevel.MINIMAL) {
+                        trace.add(RuleResult.builder()
+                                .name(node.getName() + " / " + model.getName())
+                                .expression("[decision_table]")
+                                .result(true).action("computed").outcome(resultKey).build());
+                    }
+                }
+                case "SCORECARD" -> {
+                    if (model.getInlineDefinition() == null) {
+                        throw new EvaluationException("Model '" + model.getName()
+                                + "' in node '" + node.getName() + "': inlineDefinition is required for SCORECARD");
+                    }
+                    Scorecard scorecard = objectMapper.convertValue(model.getInlineDefinition(), Scorecard.class);
+                    if (scorecard.getName() == null) scorecard.setName(model.getName());
+
+                    Policy scPolicy = new Policy();
+                    scPolicy.setId(model.getName());
+                    scPolicy.setVersion("inline");
+                    scPolicy.setType(PolicyType.SCORECARD);
+                    scPolicy.setScorecard(scorecard);
+
+                    EvaluationRequest subReq = new EvaluationRequest();
+                    subReq.setPolicy(scPolicy);
+                    subReq.setContext(request.getContext());
+                    subReq.setTraceLevel(request.getTraceLevel());
+
+                    EvaluationResult result = scorecardEvaluator.evaluate(subReq);
+
+                    Map<String, Object> injected = new HashMap<>();
+                    injected.put("score", result.getTotalScore());
+                    injected.put("label", result.getLabel());
+                    if (result.getBreakdown() != null) injected.put("breakdown", result.getBreakdown());
+                    request.getContext().put(resultKey, injected);
+
+                    if (traceLevel != TraceLevel.MINIMAL) {
+                        trace.add(RuleResult.builder()
+                                .name(node.getName() + " / " + model.getName())
+                                .expression("[scorecard]")
+                                .result(true).action("computed").outcome(resultKey).build());
+                    }
+                }
+                case "EXPRESSION" -> {
+                    if (model.getExpression() == null || model.getExpression().isBlank()) {
+                        throw new EvaluationException("Model '" + model.getName()
+                                + "' in node '" + node.getName() + "': expression is required");
+                    }
+                    ExpressionNode ast;
+                    try {
+                        ast = expressionParser.parse(model.getExpression());
+                    } catch (Exception e) {
+                        throw new EvaluationException("Model '" + model.getName()
+                                + "': parse error: " + e.getMessage(), e);
+                    }
+                    Object val = expressionEvaluator.evaluate(ast, request);
+                    request.getContext().put(resultKey, val);
+
+                    if (traceLevel != TraceLevel.MINIMAL) {
+                        trace.add(RuleResult.builder()
+                                .name(node.getName() + " / " + model.getName())
+                                .expression(traceLevel == TraceLevel.FULL ? model.getExpression() : null)
+                                .result(true).action("computed").outcome(resultKey).build());
+                    }
+                }
+                default -> throw new EvaluationException("Unknown model type '" + model.getType()
+                        + "' in node '" + node.getName() + "'");
+            }
+        }
+        return "next";
+    }
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    private Map<String, Map<String, String>> buildEdgeMap(List<PolicyEdge> edges) {
+        Map<String, Map<String, String>> map = new HashMap<>();
+        if (edges == null) return map;
+        for (PolicyEdge edge : edges) {
+            map.computeIfAbsent(edge.getSource(), k -> new HashMap<>())
+               .put(edge.getSourceHandle(), edge.getTarget());
+        }
+        return map;
+    }
+
+    private <T> T asConfig(PolicyNode node, Class<T> type) {
+        if (node.getConfig() == null) return null;
+        return objectMapper.convertValue(node.getConfig(), type);
+    }
+}

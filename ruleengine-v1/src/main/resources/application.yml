@@ -1,0 +1,10 @@
+ruleengine:
+  s3:
+    region: us-east-1
+
+spring:
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      password: change-me

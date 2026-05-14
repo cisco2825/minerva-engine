@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+                            http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.20.xsd">
+
+    <include file="db/changelog/v1/001-policy-definition.xml"/>
+    <include file="db/changelog/v1/002-table-definition.xml"/>
+    <include file="db/changelog/v1/003-lookup-definition.xml"/>
+    <include file="db/changelog/v1/004-udf-definition.xml"/>
+    <include file="db/changelog/v1/005-ref-tables.xml"/>
+    <include file="db/changelog/v1/006-evaluation-log.xml"/>
+
+</databaseChangeLog>
