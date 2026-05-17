@@ -77,6 +77,7 @@ public class Lexer {
             String two = input.substring(pos, pos + 2);
             switch (two) {
                 case "!=": advance(); advance(); return new Token(TokenType.NEQ, "!=", startLine, startCol);
+                case "==": advance(); advance(); return new Token(TokenType.EQ,  "==", startLine, startCol);
                 case "<=": advance(); advance(); return new Token(TokenType.LTE, "<=", startLine, startCol);
                 case ">=": advance(); advance(); return new Token(TokenType.GTE, ">=", startLine, startCol);
                 case "<>": advance(); advance(); return new Token(TokenType.NEQ, "<>", startLine, startCol);

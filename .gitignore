@@ -1,0 +1,26 @@
+# Maven build output
+target/
+*.class
+
+# IntelliJ IDEA
+.idea/
+*.iml
+*.ipr
+*.iws
+out/
+
+# macOS
+.DS_Store
+**/.DS_Store
+
+# Spring Boot
+*.log
+logs/
+
+# Environment / secrets
+.env
+*.env.local
+
+# Node / frontend (if added later)
+node_modules/
+dist/

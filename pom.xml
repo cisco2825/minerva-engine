@@ -19,7 +19,6 @@
     <description>Parent POM for the rule engine project</description>
 
     <modules>
-        <module>ruleengine-v1</module>
         <module>ruleengine-v2</module>
     </modules>
 

@@ -1,30 +1,17 @@
 package com.jrules.ruleengine.v2.config;
 
-import com.jrules.ruleengine.s3.S3Service;
-import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Profile;
 
-import java.io.InputStream;
-
+/**
+ * Placeholder for any local-profile-only beans.
+ * S3 no-op fallback has moved to S3ClientConfig to guarantee correct
+ * bean evaluation order relative to awsS3Service.
+ */
 @Configuration
-@Profile({"local", "mysql"})
+@Profile("local")
 public class LocalConfig {
-
-    @Bean
-    public S3Service noOpS3Service() {
-        return new S3Service() {
-            @Override
-            public InputStream getObjectWithBucketName(String bucket, String key) {
-                throw new UnsupportedOperationException(
-                        "S3 not available in local profile. FILE lookups require a real S3 connection.");
-            }
-
-            @Override
-            public void putObject(String bucket, String key, InputStream inputStream,
-                                  long contentLength, String contentType) {
-                throw new UnsupportedOperationException("S3 not available in local profile.");
-            }
-        };
-    }
+    // S3 no-op bean lives in S3ClientConfig so both S3 beans are
+    // in the same @Configuration class — this ensures @ConditionalOnMissingBean
+    // evaluates after @Conditional(S3EndpointPresentCondition.class).
 }

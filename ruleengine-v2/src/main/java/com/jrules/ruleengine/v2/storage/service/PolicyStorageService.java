@@ -233,6 +233,19 @@ public class PolicyStorageService {
         return dto;
     }
 
+    /** Soft-deletes all versions of a policy. Rows remain in DB; @SQLRestriction hides them. */
+    @Transactional
+    public void deletePolicy(String policyId) {
+        List<PolicyDefinitionEntity> versions = policyRepo.findByPolicyId(policyId);
+        if (versions.isEmpty()) {
+            throw new NotFoundException("Policy '" + policyId + "' not found");
+        }
+        for (PolicyDefinitionEntity v : versions) {
+            v.setDeleted(true);
+        }
+        policyRepo.saveAll(versions);
+    }
+
     public List<PolicySummary> listVersions(String policyId) {
         return policyRepo.findByPolicyIdOrderByCreatedAtDesc(policyId).stream()
                 .map(PolicySummary::from).toList();

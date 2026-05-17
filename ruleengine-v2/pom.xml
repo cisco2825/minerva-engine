@@ -17,11 +17,10 @@
 
     <dependencies>
 
-        <!-- V1 dependency — reuses Redis, S3DataSource, typed criterion evaluators -->
+        <!-- AWS SDK v2 — S3 client for MinIO / real AWS -->
         <dependency>
-            <groupId>com.jrules</groupId>
-            <artifactId>ruleengine-v1</artifactId>
-            <version>${project.version}</version>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>s3</artifactId>
         </dependency>
 
         <dependency>
@@ -74,6 +73,37 @@
             <scope>runtime</scope>
         </dependency>
 
+        <!-- Mail (for password reset emails) -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-mail</artifactId>
+        </dependency>
+
+        <!-- Spring Security -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-security</artifactId>
+        </dependency>
+
+        <!-- JWT (JJWT 0.12.x) -->
+        <dependency>
+            <groupId>io.jsonwebtoken</groupId>
+            <artifactId>jjwt-api</artifactId>
+            <version>0.12.6</version>
+        </dependency>
+        <dependency>
+            <groupId>io.jsonwebtoken</groupId>
+            <artifactId>jjwt-impl</artifactId>
+            <version>0.12.6</version>
+            <scope>runtime</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.jsonwebtoken</groupId>
+            <artifactId>jjwt-jackson</artifactId>
+            <version>0.12.6</version>
+            <scope>runtime</scope>
+        </dependency>
+
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>
@@ -101,37 +131,6 @@
                         </path>
                     </annotationProcessorPaths>
                 </configuration>
-            </plugin>
-
-            <plugin>
-                <groupId>com.github.eirslett</groupId>
-                <artifactId>frontend-maven-plugin</artifactId>
-                <version>1.15.0</version>
-                <configuration>
-                    <workingDirectory>src/main/frontend</workingDirectory>
-                    <installDirectory>target</installDirectory>
-                </configuration>
-                <executions>
-                    <execution>
-                        <id>install-node-and-npm</id>
-                        <goals><goal>install-node-and-npm</goal></goals>
-                        <configuration>
-                            <nodeVersion>v20.11.0</nodeVersion>
-                        </configuration>
-                    </execution>
-                    <execution>
-                        <id>npm-install</id>
-                        <goals><goal>npm</goal></goals>
-                    </execution>
-                    <execution>
-                        <id>npm-build</id>
-                        <goals><goal>npm</goal></goals>
-                        <phase>generate-resources</phase>
-                        <configuration>
-                            <arguments>run build</arguments>
-                        </configuration>
-                    </execution>
-                </executions>
             </plugin>
         </plugins>
     </build>

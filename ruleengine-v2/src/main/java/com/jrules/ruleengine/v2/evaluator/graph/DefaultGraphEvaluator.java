@@ -18,7 +18,12 @@ import com.jrules.ruleengine.v2.model.graph.config.ModelEntry;
 import com.jrules.ruleengine.v2.model.graph.config.ModelNodeConfig;
 import com.jrules.ruleengine.v2.model.graph.config.OutcomeNodeConfig;
 import com.jrules.ruleengine.v2.model.graph.config.RuleNodeConfig;
+import com.jrules.ruleengine.v2.model.graph.config.SourceNodeConfig;
 import com.jrules.ruleengine.v2.model.graph.config.WorkflowNodeConfig;
+import com.jrules.ruleengine.v2.model.lookup.Lookup;
+import com.jrules.ruleengine.v2.storage.entity.AssetStatus;
+import com.jrules.ruleengine.v2.storage.entity.LookupDefinitionEntity;
+import com.jrules.ruleengine.v2.storage.service.LookupStorageService;
 import com.jrules.ruleengine.v2.model.policy.Policy;
 import com.jrules.ruleengine.v2.model.request.EvaluationRequest;
 import com.jrules.ruleengine.v2.model.result.EvaluationResult;
@@ -51,6 +56,7 @@ public class DefaultGraphEvaluator implements GraphEvaluator {
     private final ObjectMapper objectMapper;
     private final DecisionTableEvaluator decisionTableEvaluator;
     private final ScorecardEvaluator scorecardEvaluator;
+    private final LookupStorageService lookupStorageService;
 
     @Lazy
     @Autowired
@@ -116,7 +122,7 @@ public class DefaultGraphEvaluator implements GraphEvaluator {
             case START    -> "next";
             case RULE     -> evaluateRuleNode(node, request, trace, traceLevel);
             case BRANCH   -> evaluateBranchNode(node, request, trace, traceLevel);
-            case SOURCE   -> "next"; // data enrichment placeholder — passes through
+            case SOURCE   -> evaluateSourceNode(node, request);
             case WORKFLOW -> evaluateWorkflowNode(node, request, trace, traceLevel);
             case MODEL    -> evaluateModelNode(node, request, trace, traceLevel);
             case OUTCOME  -> throw new EvaluationException("Internal error: evaluating OUTCOME node");
@@ -156,6 +162,11 @@ public class DefaultGraphEvaluator implements GraphEvaluator {
                 if (om == OnMissing.SKIP) continue;
                 result = (om == OnMissing.PASS);
             }
+
+            // Write individual rule verdict into context so downstream BRANCH nodes
+            // can reference it by name (e.g. "age_eligibility == true")
+            request.getContext().put(rule.getName(), result);
+
             if (result) {
                 if (traceLevel != TraceLevel.MINIMAL) {
                     trace.add(RuleResult.builder()
@@ -190,7 +201,7 @@ public class DefaultGraphEvaluator implements GraphEvaluator {
                         .expression(traceLevel == TraceLevel.FULL ? rule.getExpression() : null)
                         .result(false).action("fail").build());
             }
-            return "fail";
+            return "fail";   // context already has rule.getName() = false from the write above
         }
         return "pass";
     }
@@ -223,6 +234,42 @@ public class DefaultGraphEvaluator implements GraphEvaluator {
             }
         }
         return "default";
+    }
+
+    // ── SOURCE node ───────────────────────────────────────────────────────────
+
+    /**
+     * Loads each referenced lookup ID into request.getLookups() so that
+     * downstream rule/branch expressions can resolve @lookupId references.
+     * Uses the latest ACTIVE version of each lookup; falls back to the latest
+     * version of any status if no ACTIVE version exists (e.g. still DRAFT).
+     */
+    private String evaluateSourceNode(PolicyNode node, EvaluationRequest request) {
+        SourceNodeConfig config = asConfig(node, SourceNodeConfig.class);
+        if (config == null || config.getSources() == null || config.getSources().isEmpty()) {
+            return "next";
+        }
+
+        // Initialise the lookups map if the caller didn't provide one
+        if (request.getLookups() == null) {
+            request.setLookups(new HashMap<>());
+        }
+
+        for (String lookupId : config.getSources()) {
+            // Skip if caller already supplied this lookup inline
+            if (request.getLookups().containsKey(lookupId)) continue;
+
+            // Prefer the latest ACTIVE version; fall back to latest of any status
+            LookupDefinitionEntity entity =
+                lookupStorageService.getLatestActive(lookupId)
+                    .or(() -> lookupStorageService.getLatestAny(lookupId))
+                    .orElseThrow(() -> new EvaluationException(
+                        "SOURCE node references lookup '" + lookupId + "' which does not exist"));
+
+            Lookup lookup = lookupStorageService.deserialize(entity);
+            request.getLookups().put(lookupId, lookup);
+        }
+        return "next";
     }
 
     // ── WORKFLOW node ─────────────────────────────────────────────────────────
@@ -330,11 +377,16 @@ public class DefaultGraphEvaluator implements GraphEvaluator {
 
                     EvaluationResult result = scorecardEvaluator.evaluate(subReq);
 
-                    Map<String, Object> injected = new HashMap<>();
-                    injected.put("score", result.getTotalScore());
-                    injected.put("label", result.getLabel());
-                    if (result.getBreakdown() != null) injected.put("breakdown", result.getBreakdown());
-                    request.getContext().put(resultKey, injected);
+                    // Write the outcome band string directly so branch conditions like
+                    // "credit_risk_band == \"PRIME\"" resolve correctly
+                    request.getContext().put(resultKey, result.getOutcome());
+
+                    // Also write score details under resultKey_details for diagnostics
+                    Map<String, Object> details = new HashMap<>();
+                    details.put("score", result.getTotalScore());
+                    details.put("label", result.getLabel());
+                    if (result.getBreakdown() != null) details.put("breakdown", result.getBreakdown());
+                    request.getContext().put(resultKey + "_details", details);
 
                     if (traceLevel != TraceLevel.MINIMAL) {
                         trace.add(RuleResult.builder()

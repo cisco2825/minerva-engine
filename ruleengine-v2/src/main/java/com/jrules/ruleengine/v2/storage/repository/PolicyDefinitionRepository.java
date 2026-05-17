@@ -27,6 +27,8 @@ public interface PolicyDefinitionRepository extends JpaRepository<PolicyDefiniti
 
     boolean existsByPolicyIdAndVersion(String policyId, String version);
 
+    List<PolicyDefinitionEntity> findByPolicyId(String policyId);
+
     /**
      * One row per unique policyId — the most recently created version of each policy.
      * Used for the paginated policy list.

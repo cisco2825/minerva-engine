@@ -4,6 +4,7 @@ import com.jrules.ruleengine.v2.model.enums.PolicyType;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.Setter;
+import org.hibernate.annotations.SQLRestriction;
 import org.hibernate.annotations.UpdateTimestamp;
 
 import java.time.Instant;
@@ -12,6 +13,7 @@ import java.util.Set;
 
 @Entity
 @Table(name = "policy_definition")
+@SQLRestriction("deleted = false")
 @Getter
 @Setter
 public class PolicyDefinitionEntity {
@@ -55,6 +57,9 @@ public class PolicyDefinitionEntity {
 
     @Column(name = "updated_by", length = 100)
     private String updatedBy;
+
+    @Column(nullable = false, columnDefinition = "TINYINT(1)")
+    private boolean deleted = false;
 
     @ManyToMany(fetch = FetchType.LAZY)
     @JoinTable(

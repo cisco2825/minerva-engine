@@ -11,5 +11,9 @@
     <include file="db/changelog/v1/004-udf-definition.xml"/>
     <include file="db/changelog/v1/005-ref-tables.xml"/>
     <include file="db/changelog/v1/006-evaluation-log.xml"/>
+    <include file="db/changelog/v1/007-soft-delete.xml"/>
+    <include file="db/changelog/v1/008-lookup-additions.xml"/>
+    <include file="db/changelog/v1/009-user-auth.xml"/>
+    <include file="db/changelog/v1/010-password-reset-token.xml"/>
 
 </databaseChangeLog>

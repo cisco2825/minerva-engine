@@ -6,7 +6,7 @@ import com.jrules.ruleengine.v2.exception.EvaluationException;
 import com.jrules.ruleengine.v2.model.lookup.FileLookup;
 import com.jrules.ruleengine.v2.model.lookup.InlineLookup;
 import com.jrules.ruleengine.v2.model.lookup.Lookup;
-import com.jrules.ruleengine.s3.S3Service;
+import com.jrules.ruleengine.v2.s3.S3Service;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.cache.annotation.Cacheable;

@@ -9,6 +9,7 @@ public class SaveLookupRequest {
     private String lookupId;
     private String version;
     private String name;
+    private String description;
     private String createdBy;
     private Lookup lookup;
 }

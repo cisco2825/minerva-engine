@@ -9,7 +9,7 @@ public class CorsConfig implements WebMvcConfigurer {
 
     @Override
     public void addCorsMappings(CorsRegistry registry) {
-        registry.addMapping("/api/**")
+        registry.addMapping("/api/v2/**")
                 .allowedOrigins(
                         "http://localhost:3000",   // Vite dev server
                         "http://localhost:5173"    // Vite default fallback

@@ -1,6 +1,19 @@
 ruleengine:
+  app:
+    base-url: ${APP_BASE_URL:http://localhost:3000}
+  jwt:
+    secret: ${JWT_SECRET:axiom-rule-engine-jwt-secret-key-must-be-at-least-32-chars!!}
+    expiry-ms: ${JWT_EXPIRY_MS:86400000}   # 24 hours
   s3:
-    region: ap-south-1
+    region: ${AWS_REGION:ap-south-1}
+    lookup-bucket: ${LOOKUP_S3_BUCKET:ruleengine-lookups}
+    # Override to use a local S3-compatible endpoint (e.g. MinIO).
+    # Leave blank in production — real AWS credentials will be used.
+    endpoint-url: ${S3_ENDPOINT_URL:http://localhost:9000}
+    access-key: ${S3_ACCESS_KEY:minioadmin}
+    secret-key: ${S3_SECRET_KEY:minioadmin}
+  lookup:
+    max-file-size-mb: ${LOOKUP_MAX_FILE_SIZE_MB:30}
 
 spring:
   datasource:
@@ -28,6 +41,11 @@ spring:
       port: 6379
       password: change-me
 
+  servlet:
+    multipart:
+      max-file-size: ${LOOKUP_MAX_FILE_SIZE_MB:30}MB
+      max-request-size: ${LOOKUP_MAX_REQUEST_SIZE_MB:35}MB
+
   jackson:
     default-property-inclusion: non_null
     serialization:
@@ -38,6 +56,20 @@ spring:
       favor-parameter: false
       media-types:
         problem: application/problem+json
+
+  mail:
+    host: ${MAIL_HOST:smtp.gmail.com}
+    port: ${MAIL_PORT:587}
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
+    # Set to false to disable email sending (tokens will only be logged)
+    test-connection: false
 
   autoconfigure:
     exclude:

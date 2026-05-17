@@ -3,7 +3,6 @@ package com.jrules.ruleengine.v2.storage.api;
 import com.jrules.ruleengine.v2.model.policy.Policy;
 import com.jrules.ruleengine.v2.model.result.EvaluationResult;
 import com.jrules.ruleengine.v2.storage.dto.EvaluateStoredRequest;
-import com.jrules.ruleengine.v2.storage.dto.PolicyStatsDto;
 import com.jrules.ruleengine.v2.storage.dto.PolicySummary;
 import com.jrules.ruleengine.v2.storage.dto.SavePolicyRequest;
 import com.jrules.ruleengine.v2.storage.dto.UpdateStatusRequest;
@@ -38,14 +37,15 @@ public class PolicyStorageController {
                 PageRequest.of(page, size, Sort.by("createdAt").descending()));
     }
 
-    @GetMapping("/stats")
-    public PolicyStatsDto getStats() {
-        return policyStorageService.getStats();
-    }
-
     @GetMapping("/{policyId}")
     public PolicySummary getLatestActive(@PathVariable String policyId) {
         return PolicySummary.from(policyStorageService.getLatestActive(policyId));
+    }
+
+    @DeleteMapping("/{policyId}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void deletePolicy(@PathVariable String policyId) {
+        policyStorageService.deletePolicy(policyId);
     }
 
     @GetMapping("/{policyId}/versions")
