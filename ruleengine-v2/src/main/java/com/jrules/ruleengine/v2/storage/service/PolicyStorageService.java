@@ -82,7 +82,7 @@ public class PolicyStorageService {
         valReq.setLookups(req.getLookups());
         ValidationResult result = requestValidator.validate(valReq);
         if (!result.isValid()) {
-            throw new IllegalArgumentException("Policy validation failed: " + result.getErrors());
+            throw new IllegalArgumentException(formatValidationErrors(result));
         }
 
         String version = policy.getVersion();
@@ -176,7 +176,7 @@ public class PolicyStorageService {
         valReq.setUdfs(req.getUdfs());
         ValidationResult result = requestValidator.validate(valReq);
         if (!result.isValid()) {
-            throw new IllegalArgumentException("Policy validation failed: " + result.getErrors());
+            throw new IllegalArgumentException(formatValidationErrors(result));
         }
 
         entity.setName(policy.getName() != null ? policy.getName() : policy.getId());
@@ -367,6 +367,28 @@ public class PolicyStorageService {
     @SneakyThrows
     private Policy deserializePolicy(PolicyDefinitionEntity entity) {
         return objectMapper.readValue(entity.getBody(), Policy.class);
+    }
+
+    /**
+     * Converts validation errors into a readable bullet-point message.
+     * e.g.  "Policy has 2 error(s):
+     *          • Edge 'e1' references unknown target node: foo
+     *          • Node 'bar' is unreachable from START"
+     */
+    private String formatValidationErrors(ValidationResult result) {
+        List<ValidationResult.ValidationError> errors = result.getErrors();
+        if (errors == null || errors.isEmpty()) return "Policy validation failed.";
+        StringBuilder sb = new StringBuilder();
+        sb.append("Policy has ").append(errors.size())
+          .append(errors.size() == 1 ? " error" : " errors").append(":\n");
+        for (ValidationResult.ValidationError e : errors) {
+            sb.append("  • ").append(e.getMessage());
+            if (e.getSuggestion() != null && !e.getSuggestion().isBlank()) {
+                sb.append(" — ").append(e.getSuggestion());
+            }
+            sb.append("\n");
+        }
+        return sb.toString().stripTrailing();
     }
 
     @SneakyThrows
