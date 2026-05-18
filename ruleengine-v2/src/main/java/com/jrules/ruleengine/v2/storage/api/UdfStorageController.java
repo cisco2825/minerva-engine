@@ -1,5 +1,6 @@
 package com.jrules.ruleengine.v2.storage.api;
 
+import com.jrules.ruleengine.v2.auth.security.AuthUtils;
 import com.jrules.ruleengine.v2.storage.dto.SaveUdfRequest;
 import com.jrules.ruleengine.v2.storage.entity.AssetStatus;
 import com.jrules.ruleengine.v2.storage.entity.UdfDefinitionEntity;
@@ -20,6 +21,7 @@ public class UdfStorageController {
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     public UdfDefinitionEntity save(@RequestBody SaveUdfRequest request) {
+        request.setCreatedBy(AuthUtils.currentUserName());
         return udfStorageService.save(request);
     }
 

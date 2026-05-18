@@ -1,5 +1,6 @@
 package com.jrules.ruleengine.v2.storage.api;
 
+import com.jrules.ruleengine.v2.auth.security.AuthUtils;
 import com.jrules.ruleengine.v2.storage.dto.SaveTableRequest;
 import com.jrules.ruleengine.v2.storage.entity.AssetStatus;
 import com.jrules.ruleengine.v2.storage.entity.TableDefinitionEntity;
@@ -20,6 +21,7 @@ public class TableStorageController {
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     public TableDefinitionEntity save(@RequestBody SaveTableRequest request) {
+        request.setCreatedBy(AuthUtils.currentUserName());
         return tableStorageService.save(request);
     }
 

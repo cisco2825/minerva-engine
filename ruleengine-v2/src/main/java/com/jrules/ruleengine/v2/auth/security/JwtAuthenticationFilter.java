@@ -1,6 +1,5 @@
 package com.jrules.ruleengine.v2.auth.security;
 
-import com.jrules.ruleengine.v2.auth.repository.UserRepository;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -21,7 +20,6 @@ import java.util.List;
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     private final JwtTokenProvider jwtTokenProvider;
-    private final UserRepository   userRepository;
 
     @Override
     protected void doFilterInternal(HttpServletRequest request,
@@ -32,14 +30,15 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         if (StringUtils.hasText(token) && jwtTokenProvider.validate(token)) {
             String userId = jwtTokenProvider.getUserId(token);
             String email  = jwtTokenProvider.getEmail(token);
+            String name   = jwtTokenProvider.getName(token);
 
             // Lightweight principal — no DB hit on every request
+            AuthenticatedUser principal = new AuthenticatedUser(userId, email, name != null ? name : email);
             UsernamePasswordAuthenticationToken auth = new UsernamePasswordAuthenticationToken(
-                    email,
+                    principal,
                     null,
                     List.of(new SimpleGrantedAuthority("ROLE_USER"))
             );
-            auth.setDetails(userId);
             SecurityContextHolder.getContext().setAuthentication(auth);
         }
 

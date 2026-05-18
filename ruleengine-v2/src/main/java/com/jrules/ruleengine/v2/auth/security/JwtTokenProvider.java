@@ -30,13 +30,14 @@ public class JwtTokenProvider {
         this.key = Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
     }
 
-    public String generateToken(String userId, String email) {
+    public String generateToken(String userId, String email, String name) {
         Date now    = new Date();
         Date expiry = new Date(now.getTime() + expiryMs);
 
         return Jwts.builder()
                 .subject(userId)
                 .claim("email", email)
+                .claim("name", name)
                 .issuedAt(now)
                 .expiration(expiry)
                 .signWith(key)
@@ -49,6 +50,10 @@ public class JwtTokenProvider {
 
     public String getEmail(String token) {
         return parseClaims(token).get("email", String.class);
+    }
+
+    public String getName(String token) {
+        return parseClaims(token).get("name", String.class);
     }
 
     public boolean validate(String token) {

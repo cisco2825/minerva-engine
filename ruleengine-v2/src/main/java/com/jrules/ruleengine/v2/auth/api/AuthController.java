@@ -5,6 +5,7 @@ import com.jrules.ruleengine.v2.auth.dto.ForgotPasswordRequest;
 import com.jrules.ruleengine.v2.auth.dto.LoginRequest;
 import com.jrules.ruleengine.v2.auth.dto.ResetPasswordRequest;
 import com.jrules.ruleengine.v2.auth.dto.SignupRequest;
+import com.jrules.ruleengine.v2.auth.security.AuthenticatedUser;
 import com.jrules.ruleengine.v2.auth.service.AuthService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -31,8 +32,8 @@ public class AuthController {
 
     /** Returns current user info + a refreshed token. Used on app load to validate stored token. */
     @GetMapping("/me")
-    public AuthResponse me(@AuthenticationPrincipal String email) {
-        return authService.me(email);
+    public AuthResponse me(@AuthenticationPrincipal AuthenticatedUser principal) {
+        return authService.me(principal.email());
     }
 
     /**

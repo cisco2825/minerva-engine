@@ -1,5 +1,6 @@
 package com.jrules.ruleengine.v2.storage.api;
 
+import com.jrules.ruleengine.v2.auth.security.AuthUtils;
 import com.jrules.ruleengine.v2.s3.S3Service;
 import com.jrules.ruleengine.v2.storage.dto.LookupSummary;
 import com.jrules.ruleengine.v2.storage.dto.LookupUploadResponse;
@@ -81,6 +82,7 @@ public class LookupStorageController {
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     public LookupDefinitionEntity save(@RequestBody SaveLookupRequest request) {
+        request.setCreatedBy(AuthUtils.currentUserName());
         return lookupStorageService.save(request);
     }
 

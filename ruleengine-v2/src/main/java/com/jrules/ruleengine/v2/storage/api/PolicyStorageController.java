@@ -6,6 +6,7 @@ import com.jrules.ruleengine.v2.storage.dto.EvaluateStoredRequest;
 import com.jrules.ruleengine.v2.storage.dto.PolicySummary;
 import com.jrules.ruleengine.v2.storage.dto.SavePolicyRequest;
 import com.jrules.ruleengine.v2.storage.dto.UpdateStatusRequest;
+import com.jrules.ruleengine.v2.auth.security.AuthUtils;
 import com.jrules.ruleengine.v2.storage.service.PolicyStorageService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -26,6 +27,7 @@ public class PolicyStorageController {
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     public PolicySummary save(@RequestBody SavePolicyRequest request) {
+        request.setCreatedBy(AuthUtils.currentUserName());
         return PolicySummary.from(policyStorageService.save(request));
     }
 
@@ -68,6 +70,7 @@ public class PolicyStorageController {
             @PathVariable String policyId,
             @PathVariable String version,
             @RequestBody SavePolicyRequest request) {
+        request.setCreatedBy(AuthUtils.currentUserName());
         return PolicySummary.from(policyStorageService.updateDraft(policyId, version, request));
     }
 

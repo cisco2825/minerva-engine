@@ -43,7 +43,7 @@ public class AuthService {
         user.setPasswordHash(passwordEncoder.encode(req.getPassword()));
         userRepository.save(user);
 
-        String token = jwtTokenProvider.generateToken(user.getId(), user.getEmail());
+        String token = jwtTokenProvider.generateToken(user.getId(), user.getEmail(), user.getName());
         return new AuthResponse(token, user.getId(), user.getEmail(), user.getName());
     }
 
@@ -57,7 +57,7 @@ public class AuthService {
                     "Invalid email or password");
         }
 
-        String token = jwtTokenProvider.generateToken(user.getId(), user.getEmail());
+        String token = jwtTokenProvider.generateToken(user.getId(), user.getEmail(), user.getName());
         return new AuthResponse(token, user.getId(), user.getEmail(), user.getName());
     }
 
@@ -65,7 +65,7 @@ public class AuthService {
         UserEntity user = userRepository.findByEmail(email)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "User not found"));
         // Re-issue a fresh token so the client can refresh expiry
-        String token = jwtTokenProvider.generateToken(user.getId(), user.getEmail());
+        String token = jwtTokenProvider.generateToken(user.getId(), user.getEmail(), user.getName());
         return new AuthResponse(token, user.getId(), user.getEmail(), user.getName());
     }
 
