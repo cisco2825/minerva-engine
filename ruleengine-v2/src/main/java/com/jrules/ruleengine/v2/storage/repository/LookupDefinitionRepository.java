@@ -18,6 +18,8 @@ public interface LookupDefinitionRepository extends JpaRepository<LookupDefiniti
 
     Optional<LookupDefinitionEntity> findFirstByLookupIdAndStatusOrderByCreatedAtDesc(String lookupId, AssetStatus status);
 
+    List<LookupDefinitionEntity> findByLookupIdAndStatus(String lookupId, AssetStatus status);
+
     boolean existsByLookupIdAndVersion(String lookupId, String version);
 
     /**

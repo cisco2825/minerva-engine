@@ -34,6 +34,15 @@ public class LookupStorageService {
             throw new IllegalArgumentException(
                     "Lookup '" + req.getLookupId() + "' version '" + req.getVersion() + "' already exists");
         }
+
+        // Demote any currently-ACTIVE versions before making this one active
+        List<LookupDefinitionEntity> currentlyActive =
+                lookupRepo.findByLookupIdAndStatus(req.getLookupId(), AssetStatus.ACTIVE);
+        if (!currentlyActive.isEmpty()) {
+            currentlyActive.forEach(e -> e.setStatus(AssetStatus.INACTIVE));
+            lookupRepo.saveAll(currentlyActive);
+        }
+
         LookupDefinitionEntity entity = new LookupDefinitionEntity();
         entity.setId(UUID.randomUUID().toString());
         entity.setLookupId(req.getLookupId());
@@ -60,10 +69,27 @@ public class LookupStorageService {
         });
     }
 
+    /**
+     * Updates the status of a specific lookup version.
+     * Enforces single-active invariant: activating a version automatically demotes
+     * all other currently-ACTIVE versions of the same lookupId to INACTIVE.
+     */
     @Transactional
     public LookupDefinitionEntity updateStatus(String lookupId, String version, AssetStatus status) {
         LookupDefinitionEntity entity = lookupRepo.findByLookupIdAndVersion(lookupId, version)
                 .orElseThrow(() -> new NotFoundException("Lookup '" + lookupId + "' version '" + version + "' not found"));
+
+        if (status == AssetStatus.ACTIVE) {
+            // Demote every other ACTIVE version before promoting this one
+            List<LookupDefinitionEntity> currentlyActive = lookupRepo.findByLookupIdAndStatus(lookupId, AssetStatus.ACTIVE);
+            for (LookupDefinitionEntity other : currentlyActive) {
+                if (!other.getVersion().equals(version)) {
+                    other.setStatus(AssetStatus.INACTIVE);
+                }
+            }
+            lookupRepo.saveAll(currentlyActive);
+        }
+
         entity.setStatus(status);
         return lookupRepo.save(entity);
     }
