@@ -1,5 +1,8 @@
 package com.jrules.ruleengine.v2.model.enums;
 
+import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonValue;
+
 import java.util.EnumSet;
 import java.util.Map;
 import java.util.Set;
@@ -25,6 +28,7 @@ public enum Operator {
     ENDS_WITH("endsWith",      1, EnumSet.of(DataType.TEXT)),
     MATCHES("matches",         1, EnumSet.of(DataType.TEXT));
 
+    @JsonValue
     public final String token;
     public final int expectedCount;
     public final Set<DataType> allowedTypes;
@@ -42,8 +46,23 @@ public enum Operator {
         return dataType != null && allowedTypes.contains(dataType);
     }
 
+    /**
+     * Case-insensitive factory used by both Jackson ({@code @JsonCreator}) and
+     * application code. Accepts the canonical lowercase token (e.g. {@code "gte"})
+     * as well as the enum name (e.g. {@code "GTE"}).
+     */
+    @JsonCreator
     public static Operator from(String token) {
-        return token != null ? TOKEN_MAP.get(token.toLowerCase()) : null;
+        if (token == null) return null;
+        Operator op = TOKEN_MAP.get(token.toLowerCase());
+        if (op == null) {
+            String accepted = Stream.of(values())
+                    .map(o -> o.token)
+                    .collect(Collectors.joining(", "));
+            throw new IllegalArgumentException(
+                    "Invalid operator '" + token + "'. Accepted values: " + accepted);
+        }
+        return op;
     }
 
     public boolean isVariableCount() {
