@@ -44,6 +44,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -135,8 +136,64 @@ public class PolicyStorageService {
                 .orElseThrow(() -> new NotFoundException("Policy '" + policyId + "' version '" + version + "' not found"));
 
         validateStatusTransition(entity.getStatus(), req.getStatus());
+
+        // When activating, verify every WORKFLOW sub-policy is itself ACTIVE
+        if (req.getStatus() == PolicyStatus.ACTIVE) {
+            validateSubPoliciesActive(entity);
+        }
+
         entity.setStatus(req.getStatus());
         return policyRepo.save(entity);
+    }
+
+    /**
+     * Parses the policy body, finds every WORKFLOW node, and verifies the
+     * referenced sub-policy has an ACTIVE version. If a specific version is
+     * pinned, that exact version must be ACTIVE. If no version is specified,
+     * at least one ACTIVE version must exist for the policyId.
+     * Throws IllegalArgumentException listing all failing sub-policies.
+     */
+    @SneakyThrows
+    private void validateSubPoliciesActive(PolicyDefinitionEntity entity) {
+        Policy policy = objectMapper.readValue(entity.getBody(), Policy.class);
+        if (policy.getNodes() == null) return;
+
+        List<String> violations = new ArrayList<>();
+
+        for (var node : policy.getNodes()) {
+            if (node.getType() == null) continue;
+            if (!"WORKFLOW".equals(node.getType().name())) continue;
+
+            Map<String, Object> config = node.getConfig();
+            if (config == null) continue;
+
+            String subPolicyId = (String) config.get("policyId");
+            String subVersion  = (String) config.get("version");
+            if (subPolicyId == null || subPolicyId.isBlank()) continue;
+
+            if (subVersion != null && !subVersion.isBlank()) {
+                // Pinned version — check that exact version is ACTIVE
+                boolean active = policyRepo.findByPolicyIdAndVersion(subPolicyId, subVersion)
+                        .map(e -> e.getStatus() == PolicyStatus.ACTIVE)
+                        .orElse(false);
+                if (!active) {
+                    violations.add("'" + subPolicyId + "' version '" + subVersion + "' is not ACTIVE");
+                }
+            } else {
+                // Latest-active resolution — check at least one ACTIVE version exists
+                boolean hasActive = !policyRepo.findActiveByPolicyId(subPolicyId).isEmpty();
+                if (!hasActive) {
+                    violations.add("'" + subPolicyId + "' has no ACTIVE version");
+                }
+            }
+        }
+
+        if (!violations.isEmpty()) {
+            throw new IllegalArgumentException(
+                "Cannot activate policy — the following sub-policies are not active:\n" +
+                violations.stream().map(v -> "  • " + v).collect(Collectors.joining("\n"))
+            );
+        }
     }
 
     public PolicyDefinitionEntity getLatestActive(String policyId) {
@@ -214,22 +271,33 @@ public class PolicyStorageService {
         });
     }
 
-    /** Stats — count of unique policies grouped by their latest version's status. */
+    /**
+     * Stats for the dashboard header cards:
+     *  - total:          unique policy count
+     *  - live:           policies that have at least one ACTIVE version
+     *  - unpublished:    policies with no ACTIVE version
+     *  - evaluations7d:  evaluation runs in the last 7 days
+     */
     public PolicyStatsDto getStats() {
-        PolicyStatsDto dto = new PolicyStatsDto();
+        // Count unique policyIds and how many have an ACTIVE version
         long total = 0;
+        long live  = 0;
         for (Object[] row : policyRepo.countByLatestStatus()) {
             PolicyStatus status = (PolicyStatus) row[0];
             long count = ((Number) row[1]).longValue();
             total += count;
-            switch (status) {
-                case ACTIVE   -> dto.setActive(count);
-                case DRAFT    -> dto.setDraft(count);
-                case INACTIVE -> dto.setInactive(count);
-                case ARCHIVED -> dto.setArchived(count);
-            }
+            if (status == PolicyStatus.ACTIVE) live += count;
         }
+
+        PolicyStatsDto dto = new PolicyStatsDto();
         dto.setTotal(total);
+        dto.setLive(live);
+        dto.setUnpublished(total - live);
+        dto.setEvaluations7d(
+            evaluationLogRepo.countSince(
+                java.time.Instant.now().minus(7, java.time.temporal.ChronoUnit.DAYS)
+            )
+        );
         return dto;
     }
 
