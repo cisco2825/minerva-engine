@@ -8,4 +8,6 @@ import java.util.Map;
 public class OutcomeNodeConfig {
     private String outcome;
     private Map<String, Object> outputFields;
+    /** Expression strings evaluated at runtime against context; merged with outputFields (wins on conflict). */
+    private Map<String, String> outputExpressions;
 }

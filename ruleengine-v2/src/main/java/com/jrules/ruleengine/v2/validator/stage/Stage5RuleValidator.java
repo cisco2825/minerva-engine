@@ -6,6 +6,7 @@ import com.jrules.ruleengine.v2.model.graph.PolicyEdge;
 import com.jrules.ruleengine.v2.model.graph.PolicyNode;
 import com.jrules.ruleengine.v2.model.graph.config.BranchCondition;
 import com.jrules.ruleengine.v2.model.graph.config.BranchNodeConfig;
+import com.jrules.ruleengine.v2.model.graph.config.CustomOutputNodeConfig;
 import com.jrules.ruleengine.v2.model.graph.config.OutcomeNodeConfig;
 import com.jrules.ruleengine.v2.model.graph.config.RuleNodeConfig;
 import com.jrules.ruleengine.v2.model.graph.config.WorkflowNodeConfig;
@@ -77,7 +78,7 @@ public class Stage5RuleValidator {
                 continue;
             }
             if (node.getType() == NodeType.START)   startCount++;
-            if (node.getType() == NodeType.OUTCOME) outcomeCount++;
+            if (node.getType() == NodeType.OUTCOME || node.getType() == NodeType.CUSTOM_OUTPUT) outcomeCount++;
 
             validateNodeConfig(node, ctx);
         }
@@ -169,7 +170,20 @@ public class Stage5RuleValidator {
                         }
                     }
                 }
-                default -> { /* START, SOURCE need no config validation */ }
+                case CUSTOM_OUTPUT -> {
+                    if (node.getConfig() == null) {
+                        ctx.error("GRAPH.CUSTOM_OUTPUT_NO_CONFIG", STAGE, loc,
+                                "Custom output node '" + node.getId() + "' has no config");
+                    } else {
+                        CustomOutputNodeConfig cfg = objectMapper.convertValue(
+                                node.getConfig(), CustomOutputNodeConfig.class);
+                        if (cfg.getTemplate() == null || cfg.getTemplate().isBlank()) {
+                            ctx.error("GRAPH.CUSTOM_OUTPUT_MISSING_TEMPLATE", STAGE, loc,
+                                    "Custom output node '" + node.getId() + "' must have a template");
+                        }
+                    }
+                }
+                default -> { /* START, SOURCE, MODEL need no config validation here */ }
             }
         } catch (Exception e) {
             ctx.error("GRAPH.NODE_CONFIG_INVALID", STAGE, loc,

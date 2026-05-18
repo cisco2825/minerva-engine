@@ -109,4 +109,17 @@ public final class Nodes {
             }
         }
     }
+
+    // ── Subscript and field access ────────────────────────────────────────────
+    // Support: workflows['LMP_AU_SFB v1.0'].outcome
+
+    public static class SubscriptNode extends ExpressionNode {
+        public ExpressionNode base;
+        public ExpressionNode key;
+    }
+
+    public static class FieldAccessNode extends ExpressionNode {
+        public ExpressionNode base;
+        public String field;
+    }
 }

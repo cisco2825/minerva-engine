@@ -16,6 +16,8 @@ public class EvaluationResult {
     private PolicyType policyType;
     private String outcome;
     private Map<String, Object> outputFields;
+    /** Populated by CUSTOM_OUTPUT nodes. Contains the evaluated template (List or Map). */
+    private Object customOutput;
 
     // RULE_CHAIN
     private String triggeredBy;

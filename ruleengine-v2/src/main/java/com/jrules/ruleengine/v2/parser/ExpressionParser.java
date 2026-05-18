@@ -42,6 +42,8 @@ import java.util.concurrent.ConcurrentHashMap;
  *               | '[' list ']'
  *               | TABLE '(' args ')'
  *               | IDENTIFIER ( '.' IDENTIFIER )* [ '(' args ')' ]
+ *               | base '[' key ']'          (subscript access)
+ *               | base '.' field            (field access after subscript)
  * </pre>
  */
 @Component
@@ -431,26 +433,62 @@ public class ExpressionParser {
 
         private ExpressionNode parseIdentifierOrCall() {
             Token first = consume(); // IDENTIFIER
-            List<String> segments = new ArrayList<>();
-            segments.add(first.getValue());
 
-            // Dotted path: applicant.bureau.score
-            while (peek().is(TokenType.DOT)) {
-                consume();
-                Token seg = expect(TokenType.IDENTIFIER);
-                segments.add(seg.getValue());
-            }
-
-            // Function call: name(args)
-            if (segments.size() == 1 && peek().is(TokenType.LPAREN)) {
+            // Function call: single identifier followed by '('
+            if (peek().is(TokenType.LPAREN)) {
                 return parseFunctionCall(first);
             }
 
-            Nodes.ContextPathNode node = new Nodes.ContextPathNode();
-            node.segments = segments;
-            node.line     = first.getLine(); node.column = first.getColumn();
-            node.length   = first.getValue().length();
-            return node;
+            // Start building a dotted context path
+            List<String> segments = new ArrayList<>();
+            segments.add(first.getValue());
+            ExpressionNode result = null; // null means "still a pure ContextPath"
+
+            while (true) {
+                if (result == null && peek().is(TokenType.DOT)) {
+                    // Still a pure path — keep extending segments
+                    consume(); // '.'
+                    Token seg = expect(TokenType.IDENTIFIER);
+                    segments.add(seg.getValue());
+                } else if (peek().is(TokenType.LBRACKET)) {
+                    // Subscript: base['key'] or base[0]
+                    // Materialise accumulated segments into a ContextPathNode if needed
+                    if (result == null) {
+                        Nodes.ContextPathNode cp = new Nodes.ContextPathNode();
+                        cp.segments = new ArrayList<>(segments);
+                        cp.line = first.getLine(); cp.column = first.getColumn();
+                        cp.length = first.getValue().length();
+                        result = cp;
+                    }
+                    consume(); // '['
+                    ExpressionNode key = parseTernary();
+                    expect(TokenType.RBRACKET);
+                    Nodes.SubscriptNode sub = new Nodes.SubscriptNode();
+                    sub.base = result; sub.key = key;
+                    sub.line = first.getLine(); sub.column = first.getColumn();
+                    result = sub;
+                } else if (result != null && peek().is(TokenType.DOT)) {
+                    // Field access after a subscript: expr.field
+                    consume(); // '.'
+                    Token seg = expect(TokenType.IDENTIFIER);
+                    Nodes.FieldAccessNode fa = new Nodes.FieldAccessNode();
+                    fa.base = result; fa.field = seg.getValue();
+                    fa.line = seg.getLine(); fa.column = seg.getColumn();
+                    result = fa;
+                } else {
+                    break;
+                }
+            }
+
+            if (result == null) {
+                // Pure dotted path, no subscripts
+                Nodes.ContextPathNode cp = new Nodes.ContextPathNode();
+                cp.segments = segments;
+                cp.line = first.getLine(); cp.column = first.getColumn();
+                cp.length = first.getValue().length();
+                return cp;
+            }
+            return result;
         }
 
         private ExpressionNode parseFunctionCall(Token nameToken) {

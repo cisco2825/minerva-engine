@@ -73,6 +73,8 @@ public class DefaultExpressionEvaluator implements ExpressionEvaluator {
         if (node instanceof Nodes.StringOpNode       n) return evalStringOp(n, request);
         if (node instanceof Nodes.FunctionCallNode   n) return evalFunction(n, request);
         if (node instanceof Nodes.LetBlockNode       n) return evalLetBlock(n, request);
+        if (node instanceof Nodes.SubscriptNode      n) return evalSubscript(n, request);
+        if (node instanceof Nodes.FieldAccessNode    n) return evalFieldAccess(n, request);
         throw new EvaluationException("Unknown AST node type: " + node.getClass().getSimpleName());
     }
 
@@ -268,6 +270,11 @@ public class DefaultExpressionEvaluator implements ExpressionEvaluator {
             return evalTypeCheckFunction(name, node, request);
         }
 
+        // IFELSE — lazy: only evaluates the branch that's needed
+        if ("IFELSE".equals(name)) {
+            return evalIfElse(node, request);
+        }
+
         // ── Eager evaluation ─────────────────────────────────────────────────
 
         List<Object> args = node.arguments.stream()
@@ -357,6 +364,42 @@ public class DefaultExpressionEvaluator implements ExpressionEvaluator {
         udfRequest.setContext(udfContext);
         ExpressionNode udfAst = expressionParser.parse(udf.getExpression());
         return eval(udfAst, udfRequest);
+    }
+
+    // ── Subscript, field access, and IFELSE ───────────────────────────────────
+
+    private Object evalSubscript(Nodes.SubscriptNode node, EvaluationRequest request) {
+        Object base = eval(node.base, request);
+        Object key  = eval(node.key,  request);
+        if (base instanceof Map<?,?> map) {
+            String k = key instanceof Number n ? String.valueOf(n.intValue()) : String.valueOf(key);
+            return map.get(k);  // return null if key not found (workflow may not have run yet)
+        }
+        if (base instanceof List<?> list && key instanceof Number n) {
+            return list.get((int) n.doubleValue());
+        }
+        throw new EvaluationException("Cannot subscript "
+                + (base == null ? "null" : base.getClass().getSimpleName())
+                + " with key '" + key + "'");
+    }
+
+    private Object evalFieldAccess(Nodes.FieldAccessNode node, EvaluationRequest request) {
+        Object base = eval(node.base, request);
+        if (base instanceof Map<?,?> map) {
+            if (!map.containsKey(node.field)) throw new MissingValueException(node.field);
+            return map.get(node.field);
+        }
+        throw new EvaluationException("Cannot access field '" + node.field + "' on "
+                + (base == null ? "null" : base.getClass().getSimpleName()));
+    }
+
+    private Object evalIfElse(Nodes.FunctionCallNode node, EvaluationRequest request) {
+        if (node.arguments.size() != 3) {
+            throw new EvaluationException(
+                    "IFELSE() requires exactly 3 arguments, got " + node.arguments.size());
+        }
+        boolean cond = toBoolean(eval(node.arguments.get(0), request), node);
+        return cond ? eval(node.arguments.get(1), request) : eval(node.arguments.get(2), request);
     }
 
     // ── Type helpers ──────────────────────────────────────────────────────────

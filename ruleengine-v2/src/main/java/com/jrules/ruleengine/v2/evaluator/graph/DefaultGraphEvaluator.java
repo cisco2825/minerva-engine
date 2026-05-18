@@ -15,6 +15,7 @@ import com.jrules.ruleengine.v2.model.graph.config.BranchCondition;
 import com.jrules.ruleengine.v2.model.graph.config.BranchNodeConfig;
 import com.jrules.ruleengine.v2.model.graph.config.ModelEntry;
 import com.jrules.ruleengine.v2.model.graph.config.ModelNodeConfig;
+import com.jrules.ruleengine.v2.model.graph.config.CustomOutputNodeConfig;
 import com.jrules.ruleengine.v2.model.graph.config.OutcomeNodeConfig;
 import com.jrules.ruleengine.v2.model.graph.config.RuleNodeConfig;
 import com.jrules.ruleengine.v2.model.graph.config.SourceNodeConfig;
@@ -42,6 +43,7 @@ import org.springframework.stereotype.Component;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -56,6 +58,7 @@ public class DefaultGraphEvaluator implements GraphEvaluator {
     private final DecisionTableEvaluator decisionTableEvaluator;
     private final ScorecardEvaluator scorecardEvaluator;
     private final LookupStorageService lookupStorageService;
+    private final CustomOutputTemplateEvaluator customOutputTemplateEvaluator;
 
     @Lazy
     @Autowired
@@ -85,7 +88,7 @@ public class DefaultGraphEvaluator implements GraphEvaluator {
                 ? request.getTraceLevel() : TraceLevel.STANDARD;
 
         int maxSteps = 200;
-        while (current.getType() != NodeType.OUTCOME) {
+        while (current.getType() != NodeType.OUTCOME && current.getType() != NodeType.CUSTOM_OUTPUT) {
             if (--maxSteps <= 0) {
                 throw new EvaluationException("Max evaluation steps exceeded — possible cycle in policy graph");
             }
@@ -102,17 +105,35 @@ public class DefaultGraphEvaluator implements GraphEvaluator {
             }
         }
 
-        OutcomeNodeConfig outcomeConfig = asConfig(current, OutcomeNodeConfig.class);
-        return EvaluationResult.builder()
-                .policyId(policy.getId())
-                .policyVersion(policy.getVersion())
-                .policyType(PolicyType.RULE_CHAIN)
-                .outcome(outcomeConfig.getOutcome())
-                .outputFields(outcomeConfig.getOutputFields())
-                .triggeredBy(current.getName())
-                .ruleResults(traceLevel != TraceLevel.MINIMAL ? trace : null)
-                .evaluationMs(System.currentTimeMillis() - start)
-                .build();
+        if (current.getType() == NodeType.CUSTOM_OUTPUT) {
+            CustomOutputNodeConfig cfg = asConfig(current, CustomOutputNodeConfig.class);
+            if (cfg == null || cfg.getTemplate() == null || cfg.getTemplate().isBlank()) {
+                throw new EvaluationException("CUSTOM_OUTPUT node '" + current.getName() + "' has no template");
+            }
+            Object customOutput = customOutputTemplateEvaluator.evaluate(cfg.getTemplate(), request);
+            return EvaluationResult.builder()
+                    .policyId(policy.getId())
+                    .policyVersion(policy.getVersion())
+                    .policyType(PolicyType.RULE_CHAIN)
+                    .customOutput(customOutput)
+                    .triggeredBy(current.getName())
+                    .ruleResults(traceLevel != TraceLevel.MINIMAL ? trace : null)
+                    .evaluationMs(System.currentTimeMillis() - start)
+                    .build();
+        } else {
+            OutcomeNodeConfig outcomeConfig = asConfig(current, OutcomeNodeConfig.class);
+            Map<String, Object> outputFields = resolveOutcomeOutputFields(outcomeConfig, request);
+            return EvaluationResult.builder()
+                    .policyId(policy.getId())
+                    .policyVersion(policy.getVersion())
+                    .policyType(PolicyType.RULE_CHAIN)
+                    .outcome(outcomeConfig.getOutcome())
+                    .outputFields(outputFields.isEmpty() ? null : outputFields)
+                    .triggeredBy(current.getName())
+                    .ruleResults(traceLevel != TraceLevel.MINIMAL ? trace : null)
+                    .evaluationMs(System.currentTimeMillis() - start)
+                    .build();
+        }
     }
 
     private String evaluateNode(PolicyNode node, EvaluationRequest request,
@@ -124,7 +145,8 @@ public class DefaultGraphEvaluator implements GraphEvaluator {
             case SOURCE   -> evaluateSourceNode(node, request);
             case WORKFLOW -> evaluateWorkflowNode(node, request, trace, traceLevel);
             case MODEL    -> evaluateModelNode(node, request, trace, traceLevel);
-            case OUTCOME  -> throw new EvaluationException("Internal error: evaluating OUTCOME node");
+            case OUTCOME       -> throw new EvaluationException("Internal error: evaluating OUTCOME node");
+            case CUSTOM_OUTPUT -> throw new EvaluationException("Internal error: evaluating CUSTOM_OUTPUT as non-terminal node");
         };
     }
 
@@ -293,7 +315,18 @@ public class DefaultGraphEvaluator implements GraphEvaluator {
         Map<String, Object> injected = new HashMap<>();
         injected.put("outcome", subResult.getOutcome());
         if (subResult.getOutputFields() != null) injected.putAll(subResult.getOutputFields());
+        if (subResult.getCustomOutput() != null) injected.put("customOutput", subResult.getCustomOutput());
         request.getContext().put(resultKey, injected);
+
+        // Also inject under workflows['policyId version'] for CUSTOM_OUTPUT template access
+        @SuppressWarnings("unchecked")
+        Map<String, Object> workflowsMap = (Map<String, Object>)
+                request.getContext().computeIfAbsent("workflows", k -> new HashMap<>());
+        String wfKey = config.getPolicyId()
+                + (config.getVersion() != null && !config.getVersion().isBlank()
+                   ? " " + config.getVersion() : "");
+        workflowsMap.put(wfKey, injected);
+        workflowsMap.put(config.getPolicyId(), injected); // convenience: by policyId alone
 
         if (traceLevel != TraceLevel.MINIMAL) {
             trace.add(RuleResult.builder()
@@ -426,6 +459,26 @@ public class DefaultGraphEvaluator implements GraphEvaluator {
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
+
+    private Map<String, Object> resolveOutcomeOutputFields(OutcomeNodeConfig config, EvaluationRequest request) {
+        Map<String, Object> fields = new LinkedHashMap<>();
+        if (config != null && config.getOutputFields() != null) {
+            fields.putAll(config.getOutputFields());
+        }
+        if (config != null && config.getOutputExpressions() != null) {
+            for (Map.Entry<String, String> entry : config.getOutputExpressions().entrySet()) {
+                try {
+                    ExpressionNode ast = expressionParser.parse(entry.getValue());
+                    Object val = expressionEvaluator.evaluate(ast, request);
+                    fields.put(entry.getKey(), val);
+                } catch (Exception e) {
+                    throw new EvaluationException(
+                            "OUTCOME outputExpression '" + entry.getKey() + "': " + e.getMessage(), e);
+                }
+            }
+        }
+        return fields;
+    }
 
     private Map<String, Map<String, String>> buildEdgeMap(List<PolicyEdge> edges) {
         Map<String, Map<String, String>> map = new HashMap<>();

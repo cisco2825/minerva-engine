@@ -76,7 +76,7 @@ public class DefaultFunctionRegistry implements FunctionRegistry {
      * Functions handled as special cases in the evaluator (lazy arg evaluation).
      * They are not in the {@code builtins} map but are still valid function names.
      */
-    private static final Set<String> SPECIAL_CASES = Set.of("TABLE", "ISNULL", "ISNUMBER", "ISSTRING");
+    private static final Set<String> SPECIAL_CASES = Set.of("TABLE", "ISNULL", "ISNUMBER", "ISSTRING", "IFELSE");
 
     @Override
     public boolean isKnown(String name) {
