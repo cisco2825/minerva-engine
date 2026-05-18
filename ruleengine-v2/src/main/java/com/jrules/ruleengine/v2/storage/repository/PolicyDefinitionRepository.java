@@ -45,12 +45,11 @@ public interface PolicyDefinitionRepository extends JpaRepository<PolicyDefiniti
     @Query("SELECT p.policyId, COUNT(p) FROM PolicyDefinitionEntity p WHERE p.policyId IN :policyIds GROUP BY p.policyId")
     List<Object[]> countVersionsByPolicyIds(@Param("policyIds") List<String> policyIds);
 
-    /**
-     * Count of unique policies grouped by the status of their latest version.
-     * Returns [PolicyStatus, count] pairs.
-     */
-    @Query("SELECT p.status, COUNT(p) FROM PolicyDefinitionEntity p " +
-           "WHERE p.createdAt = (SELECT MAX(p2.createdAt) FROM PolicyDefinitionEntity p2 WHERE p2.policyId = p.policyId) " +
-           "GROUP BY p.status")
-    List<Object[]> countByLatestStatus();
+    /** Total number of unique policies (regardless of version/status). */
+    @Query("SELECT COUNT(DISTINCT p.policyId) FROM PolicyDefinitionEntity p")
+    long countDistinctPolicies();
+
+    /** Number of unique policies that have at least one ACTIVE version. */
+    @Query("SELECT COUNT(DISTINCT p.policyId) FROM PolicyDefinitionEntity p WHERE p.status = 'ACTIVE'")
+    long countDistinctLivePolicies();
 }

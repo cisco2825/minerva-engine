@@ -279,15 +279,8 @@ public class PolicyStorageService {
      *  - evaluations7d:  evaluation runs in the last 7 days
      */
     public PolicyStatsDto getStats() {
-        // Count unique policyIds and how many have an ACTIVE version
-        long total = 0;
-        long live  = 0;
-        for (Object[] row : policyRepo.countByLatestStatus()) {
-            PolicyStatus status = (PolicyStatus) row[0];
-            long count = ((Number) row[1]).longValue();
-            total += count;
-            if (status == PolicyStatus.ACTIVE) live += count;
-        }
+        long total = policyRepo.countDistinctPolicies();
+        long live  = policyRepo.countDistinctLivePolicies();
 
         PolicyStatsDto dto = new PolicyStatsDto();
         dto.setTotal(total);
