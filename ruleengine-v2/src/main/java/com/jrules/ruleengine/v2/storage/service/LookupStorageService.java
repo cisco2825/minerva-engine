@@ -82,13 +82,22 @@ public class LookupStorageService {
         return lookupRepo.findLatestVersionPerLookup(pageable).map(LookupSummary::from);
     }
 
+    /**
+     * Soft-deletes all versions of a lookup. Rows remain in DB for audit; @SQLRestriction hides them.
+     * The version is mangled with a timestamp suffix to free the unique constraint slot so the same
+     * lookupId+version can be re-created after deletion.
+     */
     @Transactional
     public void delete(String lookupId) {
         List<LookupDefinitionEntity> versions = lookupRepo.findByLookupIdOrderByCreatedAtDesc(lookupId);
         if (versions.isEmpty()) {
             throw new NotFoundException("Lookup '" + lookupId + "' not found");
         }
-        versions.forEach(e -> e.setDeleted(true));
+        String deletedSuffix = "_deleted_" + System.currentTimeMillis();
+        versions.forEach(e -> {
+            e.setVersion(e.getVersion() + deletedSuffix);
+            e.setDeleted(true);
+        });
         lookupRepo.saveAll(versions);
     }
 

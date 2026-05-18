@@ -233,14 +233,20 @@ public class PolicyStorageService {
         return dto;
     }
 
-    /** Soft-deletes all versions of a policy. Rows remain in DB; @SQLRestriction hides them. */
+    /**
+     * Soft-deletes all versions of a policy. Rows remain in DB for audit; @SQLRestriction hides them.
+     * The version is mangled with a timestamp suffix to free the unique constraint slot
+     * (uq_policy_version on (policy_id, version)) so the same policyId+version can be re-imported.
+     */
     @Transactional
     public void deletePolicy(String policyId) {
         List<PolicyDefinitionEntity> versions = policyRepo.findByPolicyId(policyId);
         if (versions.isEmpty()) {
             throw new NotFoundException("Policy '" + policyId + "' not found");
         }
+        String deletedSuffix = "_deleted_" + System.currentTimeMillis();
         for (PolicyDefinitionEntity v : versions) {
+            v.setVersion(v.getVersion() + deletedSuffix);
             v.setDeleted(true);
         }
         policyRepo.saveAll(versions);
