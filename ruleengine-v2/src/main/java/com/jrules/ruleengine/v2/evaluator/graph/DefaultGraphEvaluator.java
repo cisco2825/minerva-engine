@@ -6,7 +6,6 @@ import com.jrules.ruleengine.v2.evaluator.scorecard.ScorecardEvaluator;
 import com.jrules.ruleengine.v2.evaluator.table.DecisionTableEvaluator;
 import com.jrules.ruleengine.v2.exception.EvaluationException;
 import com.jrules.ruleengine.v2.exception.MissingValueException;
-import com.jrules.ruleengine.v2.model.enums.OnMissing;
 import com.jrules.ruleengine.v2.model.enums.PolicyType;
 import com.jrules.ruleengine.v2.model.enums.TraceLevel;
 import com.jrules.ruleengine.v2.model.graph.NodeType;
@@ -158,9 +157,11 @@ public class DefaultGraphEvaluator implements GraphEvaluator {
                 }
                 result = b;
             } catch (MissingValueException e) {
-                OnMissing om = rule.getOnMissing() != null ? rule.getOnMissing() : OnMissing.FAIL;
-                if (om == OnMissing.SKIP) continue;
-                result = (om == OnMissing.PASS);
+                throw new EvaluationException(
+                        "Rule '" + rule.getName() + "' in node '" + node.getName()
+                                + "': required field '" + e.getPath()
+                                + "' is missing from context. Add it to the request or use"
+                                + " cantDecideExpression to handle optional fields.");
             }
 
             // Write individual rule verdict into context so downstream BRANCH nodes

@@ -17,8 +17,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 @Component
@@ -51,7 +53,8 @@ public class Stage5RuleValidator {
             return;
         }
 
-        Set<String> nodeIds = new HashSet<>();
+        Set<String>         nodeIds  = new HashSet<>();
+        Map<String, String> nodeNames = new HashMap<>();   // id → display name
         long startCount   = 0;
         long outcomeCount = 0;
 
@@ -64,6 +67,10 @@ public class Stage5RuleValidator {
                 ctx.error("GRAPH.DUPLICATE_NODE_ID", STAGE, "policy.nodes[" + node.getId() + "]",
                         "Duplicate node id: " + node.getId());
             }
+            // Prefer the human-readable name; fall back to the id if name is absent
+            String display = (node.getName() != null && !node.getName().isBlank())
+                    ? node.getName() : node.getId();
+            nodeNames.put(node.getId(), display);
             if (node.getType() == null) {
                 ctx.error("GRAPH.NODE_MISSING_TYPE", STAGE, "policy.nodes[" + node.getId() + "]",
                         "Node '" + node.getId() + "' has no type");
@@ -94,11 +101,15 @@ public class Stage5RuleValidator {
                 if (edge.getId() != null) edgeIds.add(edge.getId());
                 if (!nodeIds.contains(edge.getSource())) {
                     ctx.error("GRAPH.EDGE_INVALID_SOURCE", STAGE, "policy.edges",
-                            "Edge '" + edge.getId() + "' references unknown source node: " + edge.getSource());
+                            "An edge from '" + nodeNames.getOrDefault(edge.getSource(), edge.getSource())
+                                    + "' points to a source node that no longer exists"
+                                    + " (id: " + edge.getSource() + ")");
                 }
                 if (!nodeIds.contains(edge.getTarget())) {
                     ctx.error("GRAPH.EDGE_INVALID_TARGET", STAGE, "policy.edges",
-                            "Edge '" + edge.getId() + "' references unknown target node: " + edge.getTarget());
+                            "An edge from '" + nodeNames.getOrDefault(edge.getSource(), edge.getSource())
+                                    + "' points to a target node that no longer exists"
+                                    + " (id: " + edge.getTarget() + ")");
                 }
             }
         }

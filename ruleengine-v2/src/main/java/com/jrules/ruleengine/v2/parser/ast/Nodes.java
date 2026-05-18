@@ -89,4 +89,24 @@ public final class Nodes {
     }
 
     public static class NullLiteralNode extends ExpressionNode {}
+
+    // ── Let block ─────────────────────────────────────────────────────────────
+    // Syntax: let name = expr; name = expr; bodyExpr
+    // Semantics: bindings are evaluated in order and added to a scoped variable
+    // frame; the frame shadows the request context for single-segment names.
+
+    public static class LetBlockNode extends ExpressionNode {
+        public List<LetBinding> bindings;
+        public ExpressionNode   body;
+
+        public static final class LetBinding {
+            public final String         name;
+            public final ExpressionNode expression;
+
+            public LetBinding(String name, ExpressionNode expression) {
+                this.name       = name;
+                this.expression = expression;
+            }
+        }
+    }
 }

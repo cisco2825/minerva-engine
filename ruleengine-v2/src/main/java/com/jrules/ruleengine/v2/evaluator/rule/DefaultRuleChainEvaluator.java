@@ -4,7 +4,6 @@ import com.jrules.ruleengine.v2.evaluator.expression.ExpressionEvaluator;
 import com.jrules.ruleengine.v2.evaluator.graph.GraphEvaluator;
 import com.jrules.ruleengine.v2.exception.EvaluationException;
 import com.jrules.ruleengine.v2.exception.MissingValueException;
-import com.jrules.ruleengine.v2.model.enums.OnMissing;
 import com.jrules.ruleengine.v2.model.enums.PolicyType;
 import com.jrules.ruleengine.v2.model.enums.TraceLevel;
 import com.jrules.ruleengine.v2.model.request.EvaluationRequest;
@@ -144,8 +143,10 @@ public class DefaultRuleChainEvaluator implements RuleChainEvaluator {
                 }
                 result = b;
             } catch (MissingValueException e) {
-                result = applyOnMissing(rule, e, skippedRules, ruleResults, trace);
-                if (rule.getOnMissing() == OnMissing.SKIP) continue;
+                throw new EvaluationException(
+                        "Rule '" + rule.getName() + "': required field '" + e.getPath()
+                                + "' is missing from context. Add it to the request or use"
+                                + " cantDecideExpression to handle optional fields.");
             }
 
             RuleAction action = result ? rule.getOnPass() : rule.getOnFail();
@@ -190,38 +191,4 @@ public class DefaultRuleChainEvaluator implements RuleChainEvaluator {
                 .build();
     }
 
-    private boolean applyOnMissing(Rule rule, MissingValueException e,
-                                   List<String> skippedRules,
-                                   List<RuleResult> ruleResults,
-                                   TraceLevel trace) {
-        switch (rule.getOnMissing()) {
-            case FAIL -> {
-                if (trace != TraceLevel.MINIMAL) {
-                    ruleResults.add(RuleResult.builder()
-                            .name(rule.getName())
-                            .result(false)
-                            .action("MISSING_FAIL")
-                            .outcome(null)
-                            .build());
-                }
-                return false;
-            }
-            case PASS -> {
-                if (trace != TraceLevel.MINIMAL) {
-                    ruleResults.add(RuleResult.builder()
-                            .name(rule.getName())
-                            .result(true)
-                            .action("MISSING_PASS")
-                            .outcome(null)
-                            .build());
-                }
-                return true;
-            }
-            case SKIP -> {
-                skippedRules.add(rule.getName());
-                return false;
-            }
-            default -> throw new EvaluationException("Unknown onMissing value for rule: " + rule.getName());
-        }
-    }
 }

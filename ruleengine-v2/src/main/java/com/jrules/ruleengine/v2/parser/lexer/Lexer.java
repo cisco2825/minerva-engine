@@ -102,7 +102,8 @@ public class Lexer {
             case ',': return new Token(TokenType.COMMA, ",", startLine, startCol);
             case '.': return new Token(TokenType.DOT, ".", startLine, startCol);
             case '?': return new Token(TokenType.QUESTION, "?", startLine, startCol);
-            case ':': return new Token(TokenType.COLON, ":", startLine, startCol);
+            case ':': return new Token(TokenType.COLON,     ":",  startLine, startCol);
+            case ';': return new Token(TokenType.SEMICOLON, ";",  startLine, startCol);
             default:
                 throw new LexerException("Unexpected character '" + c + "'", startLine, startCol);
         }
@@ -194,6 +195,7 @@ public class Lexer {
             case "TRUE":        return TokenType.TRUE;
             case "FALSE":       return TokenType.FALSE;
             case "NULL":        return TokenType.NULL;
+            case "LET":         return TokenType.LET;
             default:            return TokenType.IDENTIFIER;
         }
     }

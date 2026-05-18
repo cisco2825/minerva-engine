@@ -6,7 +6,10 @@ import com.jrules.ruleengine.v2.function.BuiltinFunction;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
+import java.util.Arrays;
 import java.util.List;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 /**
  * All built-in functions for the V2 expression language.
@@ -189,15 +192,52 @@ public final class Builtins {
         public String name() { return "DATEADD"; }
         public Object invoke(List<Object> args) {
             requireArgs(name(), args, 3);
-            LocalDate date = parseDate(toStr(args.get(0)));
-            long amount = (long) toNum(args.get(1));
-            String unit = toStr(args.get(2)).toUpperCase();
+            LocalDate date   = parseDate(toStr(args.get(0)));
+            long      amount = (long) toNum(args.get(1));
+            String    unit   = toStr(args.get(2)).toUpperCase();
             return switch (unit) {
                 case "DAYS"   -> date.plusDays(amount).toString();
                 case "MONTHS" -> date.plusMonths(amount).toString();
                 case "YEARS"  -> date.plusYears(amount).toString();
                 default -> throw new EvaluationException("DATEADD: unknown unit '" + unit + "'");
             };
+        }
+    }
+
+    /** Returns the age in full years from a date-of-birth string to today. */
+    public static class AgeFunction implements BuiltinFunction {
+        public String name() { return "AGE"; }
+        public Object invoke(List<Object> args) {
+            requireArgs(name(), args, 1);
+            LocalDate dob = parseDate(toStr(args.get(0)));
+            return (double) ChronoUnit.YEARS.between(dob, LocalDate.now());
+        }
+    }
+
+    /** Extracts the four-digit year from a date string (yyyy-MM-dd). */
+    public static class YearFunction implements BuiltinFunction {
+        public String name() { return "YEAR"; }
+        public Object invoke(List<Object> args) {
+            requireArgs(name(), args, 1);
+            return (double) parseDate(toStr(args.get(0))).getYear();
+        }
+    }
+
+    /** Extracts the month (1–12) from a date string. */
+    public static class MonthFunction implements BuiltinFunction {
+        public String name() { return "MONTH"; }
+        public Object invoke(List<Object> args) {
+            requireArgs(name(), args, 1);
+            return (double) parseDate(toStr(args.get(0))).getMonthValue();
+        }
+    }
+
+    /** Extracts the day of month (1–31) from a date string. */
+    public static class DayFunction implements BuiltinFunction {
+        public String name() { return "DAY"; }
+        public Object invoke(List<Object> args) {
+            requireArgs(name(), args, 1);
+            return (double) parseDate(toStr(args.get(0))).getDayOfMonth();
         }
     }
 
@@ -246,6 +286,48 @@ public final class Builtins {
         public Object invoke(List<Object> args) {
             requireArgs(name(), args, 1);
             return args.get(0) == null ? null : args.get(0).toString();
+        }
+    }
+
+    // ── String ↔ List ─────────────────────────────────────────────────────────
+
+    /**
+     * SPLIT(str, delimiter) → List&lt;String&gt;
+     * Splits {@code str} on the literal delimiter string. The delimiter is treated
+     * as a plain string (not a regex). Trailing empty strings are preserved.
+     */
+    public static class SplitFunction implements BuiltinFunction {
+        public String name() { return "SPLIT"; }
+        public Object invoke(List<Object> args) {
+            requireArgs(name(), args, 2);
+            String str   = toStr(args.get(0));
+            String delim = toStr(args.get(1));
+            if (delim.isEmpty()) {
+                throw new EvaluationException("SPLIT() delimiter cannot be empty");
+            }
+            return Arrays.asList(str.split(Pattern.quote(delim), -1));
+        }
+    }
+
+    /**
+     * JOIN(list, delimiter) → String
+     * Joins the elements of a list into a single string separated by {@code delimiter}.
+     * {@code null} elements are rendered as empty strings.
+     */
+    public static class JoinFunction implements BuiltinFunction {
+        public String name() { return "JOIN"; }
+        public Object invoke(List<Object> args) {
+            requireArgs(name(), args, 2);
+            Object listObj = args.get(0);
+            if (!(listObj instanceof List<?> list)) {
+                throw new EvaluationException(
+                        "JOIN() first argument must be a list, got: "
+                                + (listObj == null ? "null" : listObj.getClass().getSimpleName()));
+            }
+            String delim = toStr(args.get(1));
+            return list.stream()
+                    .map(item -> item == null ? "" : item.toString())
+                    .collect(Collectors.joining(delim));
         }
     }
 

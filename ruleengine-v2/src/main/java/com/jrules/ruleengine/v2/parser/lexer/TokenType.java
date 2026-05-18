@@ -17,6 +17,10 @@ public enum TokenType {
     CONTAINS, STARTS_WITH, ENDS_WITH, MATCHES,
     TABLE,
     TRUE, FALSE,
+    LET,
+
+    // statement separator (used by let blocks)
+    SEMICOLON,
 
     // comparison operators
     EQ, NEQ, LT, LTE, GT, GTE,
