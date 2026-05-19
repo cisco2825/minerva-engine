@@ -278,7 +278,8 @@ public class DefaultGraphEvaluator implements GraphEvaluator {
             request.setLookups(new HashMap<>());
         }
 
-        for (String lookupId : config.getSources()) {
+        for (SourceNodeConfig.SourceItem source : config.getSources()) {
+            String lookupId = source.getId();
             // Skip if caller already supplied this lookup inline
             if (request.getLookups().containsKey(lookupId)) continue;
 
