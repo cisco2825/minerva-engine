@@ -204,6 +204,19 @@ public class PolicyStorageService {
         return active.get(0);
     }
 
+    /**
+     * Returns the most recently created version of a policy regardless of status.
+     * Used during sub-policy evaluation so DRAFT/INACTIVE sub-policies can be tested
+     * without being published. Activation-time validation still enforces the ACTIVE check.
+     */
+    public PolicyDefinitionEntity getLatestAny(String policyId) {
+        List<PolicyDefinitionEntity> versions = policyRepo.findByPolicyIdOrderByCreatedAtDesc(policyId);
+        if (versions.isEmpty()) {
+            throw new NotFoundException("No version found for policy '" + policyId + "'");
+        }
+        return versions.get(0);
+    }
+
     public PolicyDefinitionEntity getByVersion(String policyId, String version) {
         return policyRepo.findByPolicyIdAndVersion(policyId, version)
                 .orElseThrow(() -> new NotFoundException("Policy '" + policyId + "' version '" + version + "' not found"));
@@ -330,8 +343,10 @@ public class PolicyStorageService {
 
     public EvaluationResult evaluateSubPolicy(String policyId, String version,
                                                EvaluateStoredRequest req, Set<String> activeChain) {
+        // Use latest version of any status so DRAFT sub-policies can be evaluated during testing.
+        // The ACTIVE constraint is enforced at activation time via validateSubPoliciesActive().
         PolicyDefinitionEntity entity = (version != null && !version.isBlank())
-                ? getByVersion(policyId, version) : getLatestActive(policyId);
+                ? getByVersion(policyId, version) : getLatestAny(policyId);
         String key = entity.getPolicyId() + "@" + entity.getVersion();
         if (activeChain.contains(key)) {
             throw new EvaluationException("Circular policy reference detected: "
