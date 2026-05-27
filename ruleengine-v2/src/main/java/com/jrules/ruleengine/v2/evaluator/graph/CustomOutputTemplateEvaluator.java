@@ -49,6 +49,25 @@ public class CustomOutputTemplateEvaluator {
         return result;
     }
 
+    /**
+     * Parse-only mode: validates template syntax without evaluating expressions.
+     * Walks the full template and calls {@code expressionParser.parse()} on every
+     * embedded expression, but never calls the evaluator. Safe to call with no
+     * evaluation context (e.g. from a validation endpoint).
+     *
+     * @throws EvaluationException on any structural or expression parse error
+     */
+    public void parseTemplate(String template) {
+        if (template == null || template.isBlank()) return;
+        int[] pos = {0};
+        parseValueParseOnly(template, pos);
+        skipWs(template, pos);
+        if (pos[0] < template.length()) {
+            throw new EvaluationException(
+                    "Custom output template has unexpected trailing content at position " + pos[0]);
+        }
+    }
+
     // ── Recursive value parser ────────────────────────────────────────────────
 
     private Object parseValue(String t, int[] p, EvaluationRequest req) {
@@ -185,6 +204,80 @@ public class CustomOutputTemplateEvaluator {
         } catch (Exception e) {
             throw new EvaluationException(
                     "Custom output template expression error in '" + exprText + "': " + e.getMessage(), e);
+        }
+    }
+
+    // ── Parse-only mirrors (no evaluation) ───────────────────────────────────
+
+    private void parseValueParseOnly(String t, int[] p) {
+        skipWs(t, p);
+        if (p[0] >= t.length()) return;
+        char c = t.charAt(p[0]);
+        if (c == '{') { parseObjectParseOnly(t, p); return; }
+        if (c == '[') { parseArrayParseOnly(t, p);  return; }
+        if (c == '"') { parseJsonString(t, p);       return; }
+        if (c == '-' || Character.isDigit(c)) { parseJsonNumber(t, p); return; }
+        if (startsWith(t, p[0], "true"))  { p[0] += 4; return; }
+        if (startsWith(t, p[0], "false")) { p[0] += 5; return; }
+        if (startsWith(t, p[0], "null"))  { p[0] += 4; return; }
+        parseExpressionParseOnly(t, p);
+    }
+
+    private void parseObjectParseOnly(String t, int[] p) {
+        p[0]++;
+        skipWs(t, p);
+        while (p[0] < t.length() && t.charAt(p[0]) != '}') {
+            skipWs(t, p);
+            if (t.charAt(p[0]) != '"')
+                throw new EvaluationException("Expected '\"' for object key at position " + p[0]);
+            parseJsonString(t, p);
+            skipWs(t, p);
+            if (p[0] >= t.length() || t.charAt(p[0]) != ':')
+                throw new EvaluationException("Expected ':' after key in custom output template");
+            p[0]++;
+            parseValueParseOnly(t, p);
+            skipWs(t, p);
+            if (p[0] < t.length() && t.charAt(p[0]) == ',') p[0]++;
+        }
+        if (p[0] < t.length()) p[0]++;
+    }
+
+    private void parseArrayParseOnly(String t, int[] p) {
+        p[0]++;
+        skipWs(t, p);
+        while (p[0] < t.length() && t.charAt(p[0]) != ']') {
+            parseValueParseOnly(t, p);
+            skipWs(t, p);
+            if (p[0] < t.length() && t.charAt(p[0]) == ',') p[0]++;
+        }
+        if (p[0] < t.length()) p[0]++;
+    }
+
+    /** Scans to the end of the expression token (same boundary logic as parseExpression)
+     *  then calls expressionParser.parse() — no evaluation. */
+    private void parseExpressionParseOnly(String t, int[] p) {
+        int start = p[0];
+        int depth = 0;
+        boolean inDouble = false, inSingle = false;
+        while (p[0] < t.length()) {
+            char c = t.charAt(p[0]);
+            if (inDouble) { if (c == '\\' && p[0]+1 < t.length()) { p[0] += 2; continue; } if (c == '"') inDouble = false; p[0]++; continue; }
+            if (inSingle) { if (c == '\\' && p[0]+1 < t.length()) { p[0] += 2; continue; } if (c == '\'') inSingle = false; p[0]++; continue; }
+            if (c == '"')  { inDouble = true;  p[0]++; continue; }
+            if (c == '\'') { inSingle = true;  p[0]++; continue; }
+            if (c == '(' || c == '[' || c == '{') { depth++; p[0]++; continue; }
+            if (c == ')' || c == ']' || c == '}') { if (depth == 0) break; depth--; p[0]++; continue; }
+            if (c == ',' && depth == 0) break;
+            p[0]++;
+        }
+        String exprText = t.substring(start, p[0]).trim();
+        if (!exprText.isEmpty()) {
+            try {
+                expressionParser.parse(exprText);
+            } catch (Exception e) {
+                throw new EvaluationException(
+                        "Custom output template expression error in '" + exprText + "': " + e.getMessage(), e);
+            }
         }
     }
 
