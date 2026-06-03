@@ -75,6 +75,19 @@ public class PolicyStorageService {
                     "Policy '" + policy.getId() + "' version '" + policy.getVersion() + "' already exists");
         }
 
+        // Block new-version creation when any existing version is still in DRAFT.
+        // A DRAFT represents unfinished work — it must be activated or archived first.
+        List<PolicyDefinitionEntity> existingVersions =
+                policyRepo.findByPolicyIdOrderByCreatedAtDesc(policy.getId());
+        existingVersions.stream()
+                .filter(e -> e.getStatus() == PolicyStatus.DRAFT)
+                .findFirst()
+                .ifPresent(draft -> {
+                    throw new IllegalArgumentException(
+                            "Cannot create a new version of '" + policy.getId() + "' — version '"
+                            + draft.getVersion() + "' is still in DRAFT. Activate or archive it first.");
+                });
+
         // Validate before storing
         ValidationRequest valReq = new ValidationRequest();
         valReq.setPolicy(policy);
