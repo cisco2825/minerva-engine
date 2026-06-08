@@ -95,9 +95,10 @@ public class Stage5RuleValidator {
                     "Policy graph must have at least one OUTCOME node");
         }
 
-        // Validate edges reference valid node ids
+        // Validate edges: valid node refs + no duplicate handles
         if (edges != null) {
-            Set<String> edgeIds = new HashSet<>();
+            Set<String> edgeIds   = new HashSet<>();
+            Set<String> seenHandles = new HashSet<>(); // "sourceId:handleId"
             for (PolicyEdge edge : edges) {
                 if (edge.getId() != null) edgeIds.add(edge.getId());
                 if (!nodeIds.contains(edge.getSource())) {
@@ -111,6 +112,17 @@ public class Stage5RuleValidator {
                             "An edge from '" + nodeNames.getOrDefault(edge.getSource(), edge.getSource())
                                     + "' points to a target node that no longer exists"
                                     + " (id: " + edge.getTarget() + ")");
+                }
+                // Each output handle must connect to exactly one target.
+                // Multiple edges from the same handle produce non-deterministic traversal.
+                if (edge.getSource() != null && edge.getSourceHandle() != null) {
+                    String handleKey = edge.getSource() + ":" + edge.getSourceHandle();
+                    if (!seenHandles.add(handleKey)) {
+                        ctx.error("GRAPH.HANDLE_MULTIPLE_EDGES", STAGE, "policy.edges",
+                                "Handle '" + edge.getSourceHandle() + "' on node '"
+                                + nodeNames.getOrDefault(edge.getSource(), edge.getSource())
+                                + "' has multiple outgoing edges — each handle must connect to exactly one node");
+                    }
                 }
             }
         }

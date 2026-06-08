@@ -275,6 +275,11 @@ public class DefaultExpressionEvaluator implements ExpressionEvaluator {
             return evalIfElse(node, request);
         }
 
+        // LOOKUP("name", "column") — fetches a column from a declared lookup table
+        if ("LOOKUP".equals(name)) {
+            return evalLookupFunction(node, request);
+        }
+
         // ── Eager evaluation ─────────────────────────────────────────────────
 
         List<Object> args = node.arguments.stream()
@@ -400,6 +405,38 @@ public class DefaultExpressionEvaluator implements ExpressionEvaluator {
         }
         boolean cond = toBoolean(eval(node.arguments.get(0), request), node);
         return cond ? eval(node.arguments.get(1), request) : eval(node.arguments.get(2), request);
+    }
+
+    /**
+     * LOOKUP("lookupName", "columnName") → List&lt;Object&gt;
+     *
+     * <p>Fetches the named column from a lookup table that was declared in a SOURCE
+     * node and loaded into {@code request.getLookups()}.  The returned list can be
+     * used directly with {@code IN} / {@code NOT IN}:
+     * <pre>
+     *   applicant.city IN LOOKUP("cc_bank_list", "city")
+     * </pre>
+     *
+     * <p>For INLINE lookups the column argument is ignored — the flat value list is
+     * returned as-is (inline lookups have no column structure).
+     */
+    private Object evalLookupFunction(Nodes.FunctionCallNode node, EvaluationRequest request) {
+        if (node.arguments.size() != 2) {
+            throw new EvaluationException(
+                    "LOOKUP() requires exactly 2 arguments: LOOKUP(\"lookupName\", \"columnName\"), " +
+                    "got " + node.arguments.size());
+        }
+        Object nameArg   = eval(node.arguments.get(0), request);
+        Object columnArg = eval(node.arguments.get(1), request);
+        if (!(nameArg instanceof String lookupName)) {
+            throw new EvaluationException(
+                    "LOOKUP() first argument must be a string literal (lookup name), got: " + nameArg);
+        }
+        if (!(columnArg instanceof String column)) {
+            throw new EvaluationException(
+                    "LOOKUP() second argument must be a string literal (column name), got: " + columnArg);
+        }
+        return lookupResolver.resolveColumn(lookupName, column, request.getLookups());
     }
 
     // ── Type helpers ──────────────────────────────────────────────────────────

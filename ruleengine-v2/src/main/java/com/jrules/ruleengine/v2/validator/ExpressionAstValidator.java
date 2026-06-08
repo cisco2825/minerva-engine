@@ -60,6 +60,11 @@ public class ExpressionAstValidator {
             return;
         }
 
+        if ("LOOKUP".equals(name)) {
+            validateLookupCall(node, request, ctx, location);
+            return;
+        }
+
         // Built-in check
         if (functionRegistry.getBuiltin(name).isPresent()) {
             return; // built-in argument counts are flexible or enforced at runtime
@@ -116,6 +121,44 @@ public class ExpressionAstValidator {
             ctx.error("EXPR.TABLE_UNKNOWN", "STAGE_6_EXPRESSION", location,
                     "TABLE() references unknown table: '" + tableName + "'",
                     "Declare it in the 'tables' map of the request",
+                    pos(nameNode));
+        }
+    }
+
+    private void validateLookupCall(Nodes.FunctionCallNode node, ValidationRequest request,
+                                     ValidationContext ctx, String location) {
+        if (node.arguments.size() != 2) {
+            ctx.error("EXPR.LOOKUP_WRONG_ARGS", "STAGE_6_EXPRESSION", location,
+                    "LOOKUP() requires exactly 2 arguments: LOOKUP(\"name\", \"column\"), got "
+                            + node.arguments.size(),
+                    "Example: LOOKUP(\"cc_bank_list\", \"city\")",
+                    pos(node));
+            return;
+        }
+        ExpressionNode nameArg   = node.arguments.get(0);
+        ExpressionNode columnArg = node.arguments.get(1);
+
+        if (!(nameArg instanceof Nodes.StringLiteralNode nameNode)) {
+            ctx.error("EXPR.LOOKUP_NAME_NOT_STRING", "STAGE_6_EXPRESSION", location,
+                    "LOOKUP() first argument must be a string literal (the lookup name)",
+                    "Example: LOOKUP(\"cc_bank_list\", \"city\")",
+                    pos(nameArg));
+            return;
+        }
+        if (!(columnArg instanceof Nodes.StringLiteralNode)) {
+            ctx.error("EXPR.LOOKUP_COLUMN_NOT_STRING", "STAGE_6_EXPRESSION", location,
+                    "LOOKUP() second argument must be a string literal (the column name)",
+                    "Example: LOOKUP(\"cc_bank_list\", \"city\")",
+                    pos(columnArg));
+            return;
+        }
+
+        // If the validation request has lookups declared, verify this one is present
+        String lookupName = nameNode.value;
+        if (request.getLookups() != null && !request.getLookups().containsKey(lookupName)) {
+            ctx.error("EXPR.LOOKUP_UNKNOWN", "STAGE_6_EXPRESSION", location,
+                    "LOOKUP() references undeclared lookup: '" + lookupName + "'",
+                    "Add it to a SOURCE node so it is loaded before this expression runs",
                     pos(nameNode));
         }
     }

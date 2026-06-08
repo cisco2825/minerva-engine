@@ -1,11 +1,13 @@
 package com.jrules.ruleengine.v2.storage.dto;
 
+import com.jrules.ruleengine.v2.model.lookup.FileLookup;
 import com.jrules.ruleengine.v2.model.lookup.LookupType;
 import com.jrules.ruleengine.v2.storage.entity.AssetStatus;
 import com.jrules.ruleengine.v2.storage.entity.LookupDefinitionEntity;
 import lombok.Data;
 
 import java.time.Instant;
+import java.util.List;
 
 @Data
 public class LookupSummary {
@@ -20,6 +22,8 @@ public class LookupSummary {
     private Instant createdAt;
     private Instant updatedAt;
     private String createdBy;
+    /** CSV column headers — present only for FILE lookups; null for INLINE lookups. */
+    private List<String> columns;
 
     public static LookupSummary from(LookupDefinitionEntity e) {
         LookupSummary s = new LookupSummary();
@@ -33,6 +37,15 @@ public class LookupSummary {
         s.createdAt   = e.getCreatedAt();
         s.updatedAt   = e.getUpdatedAt();
         s.createdBy   = e.getCreatedBy();
+        return s;
+    }
+
+    /** Variant that also populates column metadata from a deserialized lookup body. */
+    public static LookupSummary from(LookupDefinitionEntity e, com.jrules.ruleengine.v2.model.lookup.Lookup lookup) {
+        LookupSummary s = from(e);
+        if (lookup instanceof FileLookup fl && fl.getColumns() != null) {
+            s.columns = fl.getColumns();
+        }
         return s;
     }
 }

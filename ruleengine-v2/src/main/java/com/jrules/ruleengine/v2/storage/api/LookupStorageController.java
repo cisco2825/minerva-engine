@@ -25,6 +25,9 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
 
@@ -62,19 +65,25 @@ public class LookupStorageController {
 
         validateFile(file);
 
+        // Read file bytes once — used for both header extraction and S3 upload
+        byte[] fileBytes = file.getBytes();
+
+        // Extract CSV column headers from the first line (for LOOKUP() autocomplete in the FE)
+        List<String> columns = extractCsvHeaders(fileBytes);
+
         String safeFileName = sanitize(file.getOriginalFilename());
         String s3Key = "lookups/" + lookupId + "/" + version + "/" + UUID.randomUUID() + "_" + safeFileName;
 
         s3Service.putObject(
                 lookupBucket,
                 s3Key,
-                file.getInputStream(),
-                file.getSize(),
+                new java.io.ByteArrayInputStream(fileBytes),
+                fileBytes.length,
                 file.getContentType() != null ? file.getContentType() : "text/csv"
         );
 
         String fileRef = lookupBucket + "/" + s3Key;
-        return new LookupUploadResponse(fileRef, safeFileName, file.getSize());
+        return new LookupUploadResponse(fileRef, safeFileName, fileBytes.length, columns);
     }
 
     // ── Save lookup definition ────────────────────────────────────────────────
@@ -172,6 +181,76 @@ public class LookupStorageController {
         lookupStorageService.delete(lookupId);
     }
 
+    // ── Column metadata (on-demand) ───────────────────────────────────────────
+    // Returns column headers for the latest active version of a lookup.
+    // If not yet stored on the body, reads just the first line from S3, persists it,
+    // and returns it — so this call also auto-backfills that one lookup.
+
+    @GetMapping("/{lookupId}/columns")
+    public List<String> getColumns(@PathVariable String lookupId) {
+        var entityOpt = lookupStorageService.getLatestActive(lookupId);
+        if (entityOpt.isEmpty()) entityOpt = lookupStorageService.getLatestAny(lookupId);
+        if (entityOpt.isEmpty()) return List.of();
+
+        var entity = entityOpt.get();
+        com.jrules.ruleengine.v2.model.lookup.Lookup raw = lookupStorageService.deserialize(entity);
+        if (!(raw instanceof com.jrules.ruleengine.v2.model.lookup.FileLookup fl)) return List.of();
+
+        // Return stored columns if already populated
+        if (fl.getColumns() != null && !fl.getColumns().isEmpty()) return fl.getColumns();
+
+        // Otherwise read just the header row from S3, persist, and return
+        try {
+            String[] parts = fl.getFileRef().split("/", 2);
+            if (parts.length != 2) return List.of();
+            try (java.io.InputStream stream = s3Service.getObjectWithBucketName(parts[0], parts[1])) {
+                List<String> cols = extractCsvHeaders(stream.readNBytes(4096));
+                if (!cols.isEmpty()) {
+                    fl.setColumns(cols);
+                    lookupStorageService.updateBody(entity, fl);
+                }
+                return cols;
+            }
+        } catch (Exception e) {
+            return List.of();
+        }
+    }
+
+    // ── Backfill column metadata ──────────────────────────────────────────────
+    // One-time admin call: reads the first line of every FILE lookup that has no
+    // column metadata yet and persists the headers. Safe to call multiple times.
+
+    @PostMapping("/admin/backfill-columns")
+    public java.util.Map<String, Object> backfillColumns() throws Exception {
+        int updated = 0;
+        int skipped = 0;
+        int failed  = 0;
+
+        var all = lookupStorageService.findAllFileLookups();
+        for (var entity : all) {
+            try {
+                com.jrules.ruleengine.v2.model.lookup.Lookup raw = lookupStorageService.deserialize(entity);
+                if (!(raw instanceof com.jrules.ruleengine.v2.model.lookup.FileLookup fl)) { skipped++; continue; }
+                if (fl.getColumns() != null && !fl.getColumns().isEmpty()) { skipped++; continue; }
+
+                // Fetch just enough bytes to read the first line
+                String[] parts = fl.getFileRef().split("/", 2);
+                if (parts.length != 2) { failed++; continue; }
+                try (java.io.InputStream stream = s3Service.getObjectWithBucketName(parts[0], parts[1])) {
+                    byte[] buf = stream.readNBytes(4096); // header row fits in 4 KB
+                    List<String> cols = extractCsvHeaders(buf);
+                    if (cols.isEmpty()) { skipped++; continue; }
+                    fl.setColumns(cols);
+                    lookupStorageService.updateBody(entity, fl);
+                    updated++;
+                }
+            } catch (Exception e) {
+                failed++;
+            }
+        }
+        return java.util.Map.of("updated", updated, "skipped", skipped, "failed", failed);
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private void validateFile(MultipartFile file) {
@@ -192,5 +271,23 @@ public class LookupStorageController {
     private String sanitize(String filename) {
         if (filename == null) return "upload.csv";
         return filename.replaceAll("[^a-zA-Z0-9._\\-]", "_");
+    }
+
+    /**
+     * Reads the first line of a CSV byte array and returns trimmed, non-blank column headers.
+     * Returns an empty list if the file is empty or the header line is blank.
+     */
+    private List<String> extractCsvHeaders(byte[] fileBytes) {
+        try {
+            String content = new String(fileBytes, StandardCharsets.UTF_8);
+            String firstLine = content.lines().findFirst().orElse("").trim();
+            if (firstLine.isBlank()) return List.of();
+            return Arrays.stream(firstLine.split(","))
+                    .map(String::trim)
+                    .filter(h -> !h.isBlank())
+                    .toList();
+        } catch (Exception e) {
+            return List.of();
+        }
     }
 }

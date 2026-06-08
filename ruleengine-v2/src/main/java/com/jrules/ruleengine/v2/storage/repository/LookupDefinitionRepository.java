@@ -1,5 +1,6 @@
 package com.jrules.ruleengine.v2.storage.repository;
 
+import com.jrules.ruleengine.v2.model.lookup.LookupType;
 import com.jrules.ruleengine.v2.storage.entity.AssetStatus;
 import com.jrules.ruleengine.v2.storage.entity.LookupDefinitionEntity;
 import org.springframework.data.domain.Page;
@@ -21,6 +22,8 @@ public interface LookupDefinitionRepository extends JpaRepository<LookupDefiniti
     List<LookupDefinitionEntity> findByLookupIdAndStatus(String lookupId, AssetStatus status);
 
     boolean existsByLookupIdAndVersion(String lookupId, String version);
+
+    List<LookupDefinitionEntity> findByType(LookupType type);
 
     /**
      * Paginated list of the latest version per lookup (for the list page).

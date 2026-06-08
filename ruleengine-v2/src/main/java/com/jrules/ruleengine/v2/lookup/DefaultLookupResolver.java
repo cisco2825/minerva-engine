@@ -24,6 +24,8 @@ public class DefaultLookupResolver implements LookupResolver {
     private final S3Service s3Service;
     private final ObjectMapper objectMapper;
 
+    // ── Legacy @name resolution ───────────────────────────────────────────────
+
     @Override
     public List<Object> resolve(String name, Map<String, Lookup> lookups) {
         if (lookups == null || !lookups.containsKey(name)) {
@@ -60,6 +62,56 @@ public class DefaultLookupResolver implements LookupResolver {
             throw e;
         } catch (Exception e) {
             throw new EvaluationException("Failed to resolve FILE lookup '@" + name + "': " + e.getMessage(), e);
+        }
+    }
+
+    // ── LOOKUP("name", "column") resolution ──────────────────────────────────
+
+    @Override
+    public List<Object> resolveColumn(String name, String column, Map<String, Lookup> lookups) {
+        if (lookups == null || !lookups.containsKey(name)) {
+            throw new EvaluationException(
+                    "LOOKUP(\"" + name + "\", ...): lookup not found. " +
+                    "Make sure it is declared in a SOURCE node of this policy.");
+        }
+        Lookup lookup = lookups.get(name);
+        if (lookup instanceof InlineLookup inline) {
+            // Inline lookups are flat value lists — column argument is ignored
+            return inline.getValues();
+        }
+        if (lookup instanceof FileLookup file) {
+            return resolveFileColumn(name, file, column);
+        }
+        throw new EvaluationException("Unknown lookup type for LOOKUP(\"" + name + "\")");
+    }
+
+    /**
+     * Fetches a specific column from a FILE lookup.
+     * Cached per fileRef+column combination so different LOOKUP() calls on the same
+     * CSV but different columns are each cached independently.
+     */
+    @Cacheable(value = "lookups", key = "#file.fileRef + ':col:' + #column")
+    public List<Object> resolveFileColumn(String name, FileLookup file, String column) {
+        log.debug("Resolving column '{}' from FILE lookup '{}' at S3: {}", column, name, file.getFileRef());
+        try {
+            String[] parts = file.getFileRef().split("/", 2);
+            if (parts.length != 2) {
+                throw new EvaluationException("FILE lookup fileRef must be 'bucket/key', got: " + file.getFileRef());
+            }
+            String bucket = parts[0];
+            String key    = parts[1];
+            InputStream stream = s3Service.getObjectWithBucketName(bucket, key);
+
+            return switch (file.getFormat().toUpperCase()) {
+                case "JSON" -> readJson(stream, column);
+                case "CSV"  -> readCsv(stream, column);
+                default -> throw new EvaluationException("Unsupported FILE lookup format: " + file.getFormat());
+            };
+        } catch (EvaluationException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new EvaluationException(
+                    "Failed to resolve LOOKUP(\"" + name + "\", \"" + column + "\"): " + e.getMessage(), e);
         }
     }
 

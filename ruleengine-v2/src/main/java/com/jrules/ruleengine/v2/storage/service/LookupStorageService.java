@@ -138,6 +138,19 @@ public class LookupStorageService {
                 .stream().findFirst();
     }
 
+    /** All FILE-type lookup entities across all lookupIds and versions — used by the column backfill. */
+    public List<LookupDefinitionEntity> findAllFileLookups() {
+        return lookupRepo.findByType(com.jrules.ruleengine.v2.model.lookup.LookupType.FILE);
+    }
+
+    /** Overwrites the body JSON for an entity (used to persist backfilled column metadata). */
+    @Transactional
+    @SneakyThrows
+    public void updateBody(LookupDefinitionEntity entity, Object lookup) {
+        entity.setBody(objectMapper.writeValueAsString(lookup));
+        lookupRepo.save(entity);
+    }
+
     @SneakyThrows
     public Lookup deserialize(LookupDefinitionEntity entity) {
         return objectMapper.readValue(entity.getBody(), Lookup.class);
