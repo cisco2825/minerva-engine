@@ -39,4 +39,12 @@ public class EvaluationResult {
     private List<String> skippedVariables;
 
     private long evaluationMs;
+
+    /**
+     * Step-by-step execution trace of a graph-based RULE_CHAIN policy.
+     * Null for non-graph policies and when traceLevel is MINIMAL.
+     * Each entry is one node that was visited, in traversal order.
+     * The last entry is the terminal OUTCOME / CUSTOM_OUTPUT node.
+     */
+    private List<GraphTraceStep> graphTrace;
 }

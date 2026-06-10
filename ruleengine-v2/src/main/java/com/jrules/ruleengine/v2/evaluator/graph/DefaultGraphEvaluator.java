@@ -27,6 +27,7 @@ import com.jrules.ruleengine.v2.storage.service.LookupStorageService;
 import com.jrules.ruleengine.v2.model.policy.Policy;
 import com.jrules.ruleengine.v2.model.request.EvaluationRequest;
 import com.jrules.ruleengine.v2.model.result.EvaluationResult;
+import com.jrules.ruleengine.v2.model.result.GraphTraceStep;
 import com.jrules.ruleengine.v2.model.result.RuleResult;
 import com.jrules.ruleengine.v2.model.rule.Rule;
 import com.jrules.ruleengine.v2.model.scorecard.Scorecard;
@@ -86,13 +87,31 @@ public class DefaultGraphEvaluator implements GraphEvaluator {
         List<RuleResult> trace = new ArrayList<>();
         TraceLevel traceLevel = request.getTraceLevel() != null
                 ? request.getTraceLevel() : TraceLevel.STANDARD;
+        boolean collectGraphTrace = traceLevel != TraceLevel.MINIMAL;
+        List<GraphTraceStep> graphTrace = collectGraphTrace ? new ArrayList<>() : null;
 
         int maxSteps = 200;
         while (current.getType() != NodeType.OUTCOME && current.getType() != NodeType.CUSTOM_OUTPUT) {
             if (--maxSteps <= 0) {
                 throw new EvaluationException("Max evaluation steps exceeded — possible cycle in policy graph");
             }
+
+            int detailsBefore = trace.size();
+            long nodeStart = System.currentTimeMillis();
+
             String handle = evaluateNode(current, request, trace, traceLevel);
+
+            if (collectGraphTrace) {
+                graphTrace.add(GraphTraceStep.builder()
+                        .nodeId(current.getId())
+                        .nodeName(current.getName())
+                        .nodeType(current.getType())
+                        .handleTaken(handle)
+                        .durationMs(System.currentTimeMillis() - nodeStart)
+                        .details(new ArrayList<>(trace.subList(detailsBefore, trace.size())))
+                        .build());
+            }
+
             String nextId = edgeMap.getOrDefault(current.getId(), Map.of()).get(handle);
             if (nextId == null) {
                 throw new EvaluationException(
@@ -103,6 +122,18 @@ public class DefaultGraphEvaluator implements GraphEvaluator {
             if (current == null) {
                 throw new EvaluationException("Edge points to unknown node id: " + nextId);
             }
+        }
+
+        // Record the terminal node (OUTCOME / CUSTOM_OUTPUT) as the last trace step
+        if (collectGraphTrace) {
+            graphTrace.add(GraphTraceStep.builder()
+                    .nodeId(current.getId())
+                    .nodeName(current.getName())
+                    .nodeType(current.getType())
+                    .handleTaken(null)
+                    .durationMs(0L)
+                    .details(List.of())
+                    .build());
         }
 
         if (current.getType() == NodeType.CUSTOM_OUTPUT) {
@@ -117,7 +148,8 @@ public class DefaultGraphEvaluator implements GraphEvaluator {
                     .policyType(PolicyType.RULE_CHAIN)
                     .customOutput(customOutput)
                     .triggeredBy(current.getName())
-                    .ruleResults(traceLevel != TraceLevel.MINIMAL ? trace : null)
+                    .ruleResults(collectGraphTrace ? trace : null)
+                    .graphTrace(graphTrace)
                     .evaluationMs(System.currentTimeMillis() - start)
                     .build();
         } else {
@@ -130,7 +162,8 @@ public class DefaultGraphEvaluator implements GraphEvaluator {
                     .outcome(outcomeConfig.getOutcome())
                     .outputFields(outputFields.isEmpty() ? null : outputFields)
                     .triggeredBy(current.getName())
-                    .ruleResults(traceLevel != TraceLevel.MINIMAL ? trace : null)
+                    .ruleResults(collectGraphTrace ? trace : null)
+                    .graphTrace(graphTrace)
                     .evaluationMs(System.currentTimeMillis() - start)
                     .build();
         }
